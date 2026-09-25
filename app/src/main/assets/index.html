@@ -1,0 +1,1745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Accessible GitHub APK Builder</title>
+<style>
+  :root{color-scheme:light}
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5;margin:0;background:#f6f7f9;color:#17181a}
+  header{background:#111827;color:#fff;padding:18px}
+  main{max-width:1000px;margin:auto;padding:16px}
+  section{background:#fff;border:1px solid #d7dbe0;border-radius:12px;padding:16px;margin:0 0 16px}
+  h1,h2{margin-top:0}
+  label{display:block;font-weight:700;margin:.8rem 0 .3rem}
+  input,select,textarea,button{font:inherit}
+  input,select,textarea{width:100%;padding:11px;border:2px solid #9aa3ad;border-radius:8px;background:#fff}
+  textarea{min-height:280px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  button{padding:15px 15px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font-weight:700;margin:.6rem .5rem .6rem 0;cursor:pointer;min-height:48px}
+  button.secondary{background:#475569}
+  button.danger{background:#b91c1c}
+  button.success{background:#047857}
+  button:focus,input:focus,select:focus,textarea:focus{outline:4px solid #f59e0b;outline-offset:2px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .status{padding:10px;border-left:5px solid #1d4ed8;background:#eef4ff}
+  .error{border-left-color:#b91c1c;background:#fff1f2}
+  .ok{border-left-color:#047857;background:#ecfdf5}
+  .muted{color:#475569}
+  .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  ul.filelist{list-style:none;padding:0;max-height:330px;overflow:auto;border:1px solid #d7dbe0;border-radius:8px}
+  ul.filelist li{border-bottom:1px solid #e5e7eb}
+  ul.filelist li.repoRow{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;gap:8px}
+  ul.filelist li.repoRow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  ul.filelist li.repoRow button{width:auto;margin:0 0 0 6px}
+  ul.filelist button{display:block;width:100%;text-align:left;background:#fff;color:#111;padding:10px;border-radius:0;margin:0}
+  ul.filelist button:hover{background:#eef2ff}
+  pre{white-space:pre-wrap;overflow:auto;background:#111827;color:#e5e7eb;padding:12px;border-radius:8px;max-height:360px}
+  .sr{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+  @media(max-width:700px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Accessible GitHub APK Builder</h1>
+  <p>Upload ZIPs, manage repositories, edit files, start GitHub Actions builds, and read build errors — without using the GitHub website.</p>
+</header>
+
+<main>
+<section>
+<h2>1. GitHub connection</h2>
+<div id="connectionStatus" class="status" role="status" aria-live="polite">Not connected.</div>
+<details id="moreOptionsDetails">
+<summary id="moreOptionsSummary" style="cursor:pointer;font-weight:700;padding:6px 0">More options (GitHub token, Gemini key)</summary>
+<div style="padding-top:10px">
+<p class="muted">Enter your GitHub Personal Access Token. It stays in this page only unless you choose to save it in your browser. Never send the token to anyone.</p>
+<label for="token">GitHub token</label>
+<input id="token" type="password" autocomplete="off" aria-describedby="tokenHelp">
+<p id="tokenHelp" class="muted">For this tool, the token needs repository contents write access and Actions/workflow access.</p>
+<label><input id="rememberToken" type="checkbox" style="width:auto" checked> Remember token in this file (auto-connect next time)</label>
+<button id="connect">Connect</button>
+
+<h3 style="margin-top:18px">Gemini API key (optional — for auto-fixing build errors)</h3>
+<p class="muted">If set, a failed build is fixed automatically: the error and the file(s) it points to are sent to Gemini, the fix it returns is pushed back to GitHub, and the build is started again — up to 3 tries per build, fully automatic, no confirmation asked. Get a free key at aistudio.google.com. It stays in this browser only, same as the token above.</p>
+<label for="geminiKey">Gemini API key</label>
+<input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off">
+<label><input type="checkbox" id="rememberGeminiKey" style="width:auto" checked> Remember this key in this file</label>
+<button id="saveGeminiKey">Save Gemini key</button>
+</div>
+</details>
+</section>
+
+<section id="repoListSection">
+<h2>2. Repository</h2>
+<p class="muted">Your repositories. Tap a name, or Edit, to open it. Tap Delete to remove one.</p>
+<ul id="repoList" class="filelist" aria-label="Your repositories">
+<li>Connect first to load your repositories.</li>
+</ul>
+<div class="grid">
+<div>
+<label for="owner">Owner / username</label>
+<input id="owner" placeholder="mobinsayyea-netizen">
+</div>
+<div>
+<label for="repo">Repository name</label>
+<input id="repo" placeholder="Advance-audio-video-editor.-">
+</div>
+</div>
+<div class="row">
+<button id="createRepo">Create repository</button>
+<button id="loadRepoBtn" class="secondary">Load this repository</button>
+<button id="diagnose" class="secondary">Diagnose this repository</button>
+</div>
+<div id="repoStatus" class="status" role="status" aria-live="polite">No repository loaded.</div>
+<pre id="diagnoseOutput" aria-label="Diagnostic results" style="display:none"></pre>
+</section>
+
+<section id="repoPanel" style="display:none">
+<h2 id="repoPanelTitle">Repository workspace</h2>
+<div class="row">
+<button id="closeRepoPanel" class="secondary">Go back to repository list</button>
+<button id="deleteThisRepo" class="danger">Delete this repository</button>
+</div>
+
+<h3>Upload files</h3>
+<p class="muted">Choose one or more files of any type, or a ZIP project. ZIPs are extracted automatically, keeping their folder structure. Other files upload as-is.</p>
+<label for="fileInput">Files to upload</label>
+<input id="fileInput" type="file" multiple>
+<label for="uploadTargetPath">Save to this exact path in the repo (only for a single non-ZIP file — leave blank to use the file's own name at the repo root)</label>
+<input id="uploadTargetPath" placeholder="gradle/wrapper/gradle-wrapper.properties">
+<label for="commitMessage">Commit message</label>
+<input id="commitMessage" placeholder="Upload files" value="Upload files">
+<label><input id="autoBuildAfterUpload" type="checkbox" style="width:auto" checked> Start APK build automatically after upload</label>
+<div class="row">
+<button id="uploadZip" class="success">Upload selected file(s)</button>
+</div>
+<div id="uploadStatus" class="status" role="status" aria-live="polite">No files selected.</div>
+<button id="copyUploadStatus" type="button">Copy this message</button>
+<textarea id="uploadStatusFallback" readonly style="display:none;width:100%;height:120px;margin-top:6px" aria-label="Message text — long-press, select all, then copy"></textarea>
+
+<h3>Or paste text instead of choosing a file</h3>
+<p class="muted">Paste any text here. If it contains <code>=== FILE: path ===</code> markers (like the text dump this tool's companion chat can generate for a whole project), it is split automatically into all of those files in one upload. Otherwise it uploads as a single file — enter a path for it below first.</p>
+<label for="pastePath">File path (only needed if no === FILE: === markers are found, or to name a fetched link below)</label>
+<input id="pastePath" placeholder="app/src/main/MainActivity.kt">
+<label for="pasteArea">Pasted text</label>
+<textarea id="pasteArea" spellcheck="false" aria-label="Text to upload as one or more files"></textarea>
+<div class="row">
+<button id="uploadPaste" class="success">Upload pasted text</button>
+</div>
+
+<h3>Or fetch a whole project/ZIP from a link</h3>
+<p class="muted">Best effort — this only works for links that allow being fetched from a browser page (for example GitHub's own "raw" file links). Most ordinary web pages, Google Drive, and Dropbox links block this (a CORS restriction the site itself enforces, not a bug here) — if it fails, use "paste text" or "Upload files" above instead. If the link ends in .zip, it is automatically unpacked into its individual files, exactly like uploading a ZIP above.</p>
+<label for="fetchUrl">Link to the file or ZIP</label>
+<input id="fetchUrl" placeholder="https://raw.githubusercontent.com/...">
+<div class="row">
+<button id="uploadUrl" class="success">Fetch and upload this link</button>
+</div>
+
+<h3>Or add the Android build workflow with one tap</h3>
+<p class="muted">Most Android projects don't come with a GitHub Actions workflow file, so "Start APK build" below has nothing to run until one exists. This creates <code>.github/workflows/build.yml</code> for you — a standard debug-APK build using JDK 17 and Gradle 8.13 — with a single tap. Safe to tap again later; it will just update the file.</p>
+<input id="gradleSubfolder" type="hidden">
+<p id="detectedSubfolderNote" class="muted" role="status" aria-live="polite"></p>
+<div class="row">
+<button id="addWorkflow" class="success">Add Android build workflow</button>
+</div>
+
+<h3>Files in this repository</h3>
+<div class="row">
+<button id="refreshFiles">Refresh files</button>
+<button id="newFile">Create new file</button>
+</div>
+<label for="filePath">File path</label>
+<input id="filePath" placeholder="app/src/main/...">
+<label for="fileEditor">File contents</label>
+<textarea id="fileEditor" spellcheck="false" aria-label="File code or text editor"></textarea>
+<div class="row">
+<button id="saveFile" class="success">Save file</button>
+<button id="deleteFile" class="danger">Delete selected file</button>
+</div>
+<ul id="fileList" class="filelist" aria-label="Repository files"></ul>
+
+<h3>Build APK</h3>
+<p class="muted">The build still runs on GitHub Actions, but you control it from here. The workflow file is detected automatically from .github/workflows — you do not need to name it a specific way. If there is more than one, you will be asked which to run. Once a build starts, this page checks its progress automatically every few seconds and announces success or failure — you don't need to tap anything else. If it fails, the errors are read and copied to your clipboard automatically.</p>
+<div class="row">
+<button id="build" class="success">Start APK build</button>
+<button id="refreshBuild">Refresh build status</button>
+<button id="getLogs" class="secondary">Get &amp; copy build errors</button>
+</div>
+<div id="buildStatus" class="status" role="status" aria-live="polite">No build checked yet.</div>
+<button id="copyBuildStatus" type="button">Copy this message</button>
+<textarea id="buildStatusFallback" readonly style="display:none;width:100%;height:120px;margin-top:6px" aria-label="Message text — long-press, select all, then copy"></textarea>
+<div id="errorNavRow" class="row" style="display:none">
+<button id="prevError" type="button">Previous error</button>
+<span id="errorPosition" role="status" aria-live="polite"></span>
+<button id="nextError" type="button">Next error</button>
+</div>
+<pre id="logs" aria-label="Current build error">No build log loaded.</pre>
+<button id="copyCurrentError" type="button" style="display:none">Copy this one error</button>
+<textarea id="logsFallback" readonly style="display:none;width:100%;height:120px;margin-top:6px" aria-label="Error text — long-press, select all, then copy"></textarea>
+<button id="downloadApk" class="success" disabled>Open APK artifact page</button>
+<button id="openRunPage" class="secondary" disabled>Open this build's page on GitHub website</button>
+
+<h3>Gemini auto-fix (optional)</h3>
+<p class="muted">If a build fails, this fixes it automatically — no confirmation asked — up to 3 tries. Set the Gemini API key once under "More options" next to the GitHub token, in section 1 above.</p>
+<button id="resetAutoFix" class="secondary">Reset auto-fix attempts</button>
+<div id="geminiFixStatus" class="status" role="status" aria-live="polite">Auto-fix not run yet.</div>
+
+<h3>Upload a large file (up to 2 GB, e.g. a big APK)</h3>
+<p class="muted">Normal uploads above are limited to 100 MB (a GitHub limit, not this tool's). For anything bigger, this uploads it as a GitHub "Release" file instead, which allows up to 2 GB. It can take a few minutes on mobile data — stay on this page until it says done. When it finishes, the link below is filled in automatically for the Decompile section further down. <strong>Note:</strong> if this repository is public (the default when created with this tool), the uploaded file becomes downloadable by anyone with its link — don't upload anything private this way.</p>
+<label for="largeFileInput">Large file to upload</label>
+<input id="largeFileInput" type="file">
+<div class="row">
+<button id="uploadLargeFile" class="success">Upload as Release file</button>
+</div>
+<div id="largeFileStatus" class="status" role="status" aria-live="polite">No large file uploaded yet.</div>
+<button id="copyLargeFileStatus" type="button">Copy this message</button>
+<textarea id="largeFileStatusFallback" readonly style="display:none;width:100%;height:120px;margin-top:6px" aria-label="Message text — long-press, select all, then copy"></textarea>
+<label for="largeFileUrl">Link to the uploaded file (fills in automatically)</label>
+<input id="largeFileUrl" readonly placeholder="Appears here once uploaded">
+
+<h3>Decompile an APK (get readable Java-like source code)</h3>
+<p class="muted">Use ONE of the two boxes below, not both — whichever matches how you added the .apk. Small file (under 100 MB) uploaded with "Upload files" above: put its repository path in the first box, e.g. <code>app.apk</code>. Large file (100 MB–2 GB) uploaded just above as a Release: the link box below fills in automatically — leave the first box empty. Then tap "Start Decompile". GitHub Actions runs jadx and packages the whole result into one ZIP, downloadable in a single tap below — not separate files.</p>
+<label for="decompileApkPath">Path to the .apk file in this repository (small files only — leave blank if using the link below)</label>
+<input id="decompileApkPath" placeholder="app.apk">
+<label for="decompileApkUrl">Link to a large .apk uploaded above (leave blank if using the path above)</label>
+<input id="decompileApkUrl">
+<div class="row">
+<button id="addDecompileWorkflow" class="success">Add Decompile workflow (one-time setup)</button>
+<button id="startDecompile" class="success">Start Decompile</button>
+<button id="refreshDecompileBtn">Refresh decompile status</button>
+</div>
+<div id="decompileStatus" class="status" role="status" aria-live="polite">No decompile checked yet.</div>
+<button id="copyDecompileStatus" type="button">Copy this message</button>
+<textarea id="decompileStatusFallback" readonly style="display:none;width:100%;height:120px;margin-top:6px" aria-label="Message text — long-press, select all, then copy"></textarea>
+<button id="downloadDecompiled" class="success" disabled>Download decompiled code (ZIP)</button>
+</section>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const api = "https://api.github.com";
+  let selectedFileSha = null;
+  let latestRun = null;
+  let repoDefaultBranch = "main";
+  let extractedFiles = [];
+  let autoFixAttempts = 0;
+  const AUTO_FIX_MAX_ATTEMPTS = 3;
+
+  function token(){ return $("token").value.trim() || localStorage.getItem("gh_apk_token") || ""; }
+  function owner(){ return $("owner").value.trim(); }
+  function repo(){ return $("repo").value.trim(); }
+  function geminiKey(){ return $("geminiKey").value.trim() || localStorage.getItem("gemini_apk_key") || ""; }
+  const savedGeminiKey=localStorage.getItem("gemini_apk_key");
+  if(savedGeminiKey) $("geminiKey").value=savedGeminiKey;
+  $("saveGeminiKey").onclick=()=>{
+    if($("rememberGeminiKey").checked && $("geminiKey").value.trim()){
+      localStorage.setItem("gemini_apk_key",$("geminiKey").value.trim());
+      msg($("geminiFixStatus"),"Gemini key saved on this device.","ok");
+    }else{
+      localStorage.removeItem("gemini_apk_key");
+      msg($("geminiFixStatus"),"Gemini key cleared from this device.","");
+    }
+  };
+  $("resetAutoFix").onclick=()=>{
+    autoFixAttempts=0;
+    msg($("geminiFixStatus"),"Auto-fix attempt count reset — up to 3 tries allowed again on the next failure.","ok");
+  };
+  function headers(json=false){
+    const h={Authorization:"Bearer "+token(),Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"};
+    if(json) h["Content-Type"]="application/json";
+    return h;
+  }
+  function msg(el,text,type=""){ el.textContent=text; el.className="status "+type; }
+  function needConnection(){
+    if(!token()){ alert("Please enter your GitHub token first."); $("token").focus(); return false; }
+    if(!owner()||!repo()){ alert("Enter the repository owner and repository name first."); return false; }
+    return true;
+  }
+  async function request(url, options={}){
+    // Every request now carries its own timeout: on a large upload a single stalled
+    // response (no error, no data, browser just waits forever) used to freeze the
+    // whole upload silently. If GitHub doesn't answer within REQUEST_TIMEOUT_MS, we
+    // abort that one call and throw, so the caller (see requestWithRetry) can retry
+    // or the user can at least see a clear error instead of a permanent hang.
+    const REQUEST_TIMEOUT_MS=25000;
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
+    let r;
+    try{
+      r=await fetch(api+url,{...options,headers:{...headers(!!options.body),...(options.headers||{})},signal:controller.signal});
+    }catch(e){
+      if(e.name==="AbortError"){ const te=new Error("Request timed out after "+(REQUEST_TIMEOUT_MS/1000)+"s (no response from GitHub)."); te.status=0; te.timeout=true; throw te; }
+      throw e;
+    }finally{
+      clearTimeout(timer);
+    }
+    let data=null;
+    const ct=r.headers.get("content-type")||"";
+    if(ct.includes("json")) data=await r.json(); else data=await r.text();
+    if(!r.ok){ const e=new Error(data?.message||data||("GitHub error "+r.status)); e.status=r.status; e.data=data; throw e; }
+    return data;
+  }
+  function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
+  // Wraps request() with automatic retry + backoff for the high-volume upload loop.
+  // Retries on: timeouts, network errors, and GitHub's secondary rate limit (403).
+  // Does NOT retry on other 4xx errors (bad token, validation errors) since retrying
+  // those would just fail the same way every time.
+  async function requestWithRetry(url, options={}, maxRetries=5){
+    let lastErr;
+    for(let attempt=1;attempt<=maxRetries;attempt++){
+      try{
+        return await request(url,options);
+      }catch(e){
+        lastErr=e;
+        // Widened on purpose: GitHub's abuse-detection / secondary rate limit doesn't always
+        // say "rate limit" in the message (sometimes just "please wait" or a 409 on a busy
+        // ref), and mobile networks throw plain 403/409/429 blips too. Treating only the exact
+        // "rate limit" wording as retryable meant one oddly-worded block killed the entire
+        // batch instead of just pausing and continuing.
+        const isRetryable=e.timeout || e.status===0 || e.status===403 || e.status===409 || e.status===429 || e.status>=500;
+        if(!isRetryable || attempt===maxRetries) throw e;
+        const backoffMs=6000*attempt;
+        await sleep(backoffMs);
+      }
+    }
+    throw lastErr;
+  }
+  // Builds as complete a picture of a failure as GitHub gives us: the HTTP
+  // status, GitHub's own message, and (for validation-style failures) the
+  // per-field "errors" array GitHub's API returns, e.g. when a blob is too
+  // large or a ref already exists. Previously this only returned the bare
+  // message, which for many real failures (rate limits, oversized files,
+  // permission problems) is too vague to tell what actually went wrong.
+  function explainError(e){
+    const parts=[];
+    if(e?.status) parts.push("HTTP "+e.status);
+    const base=e?.data?.message||e?.message||String(e);
+    parts.push(base);
+    const fieldErrors=e?.data?.errors;
+    if(Array.isArray(fieldErrors)&&fieldErrors.length){
+      parts.push(fieldErrors.map(fe=>{
+        const bits=[fe.resource,fe.field,fe.code].filter(Boolean).join(" ");
+        return fe.message?(bits?bits+": "+fe.message:fe.message):bits;
+      }).filter(Boolean).join("; "));
+    }
+    if(e?.status===403 && /rate limit/i.test(base)){
+      parts.push("This is GitHub's own rate limit, not a bug in this tool — it happens when too many files upload too fast (a large .gradle/.idea/build folder in the ZIP is the usual cause). Wait a few minutes and try again, ideally after re-zipping without those folders.");
+    }
+    return parts.filter(Boolean).join(" — ");
+  }
+
+  const saved=localStorage.getItem("gh_apk_token");
+  if(saved){ $("token").value=saved; $("rememberToken").checked=true; }
+  const savedOwner=localStorage.getItem("gh_apk_owner");
+  if(savedOwner) $("owner").value=savedOwner;
+
+  $("connect").onclick=async()=>{ await doConnect(); };
+
+  async function doConnect(){
+    if(!token()){msg($("connectionStatus"),"Enter a token first.","error");return;}
+    try{
+      const u=await request("/user");
+      if($("rememberToken").checked) localStorage.setItem("gh_apk_token",$("token").value.trim());
+      else localStorage.removeItem("gh_apk_token");
+      localStorage.setItem("gh_apk_owner",u.login);
+      $("owner").value=u.login;
+      msg($("connectionStatus"),"Connected as "+u.login+".","ok");
+      $("moreOptionsDetails").open=false;
+      await loadRepoPicker();
+    }catch(e){
+      msg($("connectionStatus"),"Connection failed: "+explainError(e)+" — open More options below to try again.","error");
+      $("moreOptionsDetails").open=true;
+    }
+  }
+
+  // Auto-connect on load if a token was saved from before, so opening this file is a one-tap
+  // (or zero-tap) experience instead of retyping the token every time. The token box itself
+  // stays tucked away inside "More options" so it doesn't reappear on every open once it's
+  // already working.
+  if(saved){
+    $("moreOptionsDetails").open=false;
+    msg($("connectionStatus"),"Reconnecting with your saved token…");
+    doConnect().catch(()=>{});
+    setTimeout(()=>{
+      // If the first attempt failed (e.g. a brief network drop right after opening the file),
+      // silently try once more before bothering the user.
+      if($("connectionStatus").className.includes("error")){
+        msg($("connectionStatus"),"Retrying connection…");
+        doConnect();
+      }
+    },3000);
+  }else{
+    // No token saved yet — this is a first-time open, so show the token field right away.
+    $("moreOptionsDetails").open=true;
+  }
+
+  async function loadRepoPicker(){
+    const list=$("repoList");
+    try{
+      list.innerHTML="<li>Loading your repositories…</li>";
+      let repos=[],page=1;
+      while(true){
+        const batch=await request("/user/repos?per_page=100&page="+page+"&sort=updated");
+        repos=repos.concat(batch);
+        if(batch.length<100) break;
+        page++;
+        if(page>10) break; // safety cap
+      }
+      if(repos.length===0){
+        list.innerHTML="<li>No repositories found on this account.</li>";
+        return;
+      }
+      list.innerHTML="";
+      repos.forEach(r=>{
+        const li=document.createElement("li"); li.className="repoRow";
+        const span=document.createElement("span"); span.textContent=r.full_name+(r.private?" (private)":"");
+        const editBtn=document.createElement("button"); editBtn.textContent="Edit"; editBtn.className="success";
+        editBtn.onclick=async()=>{
+          $("owner").value=r.owner.login; $("repo").value=r.name;
+          try{await loadRepo();}catch(e){msg($("repoStatus"),"Load failed: "+explainError(e),"error");}
+        };
+        editBtn.textContent="Open";
+        const delBtn=document.createElement("button"); delBtn.textContent="Delete"; delBtn.className="danger";
+        let deleteArmed=false, deleteArmedTimer=null;
+        delBtn.onclick=async()=>{
+          if(!deleteArmed){
+            deleteArmed=true;
+            delBtn.textContent="Tap again to confirm delete";
+            msg($("repoStatus"),"Tap Delete once more within 10 seconds to permanently delete "+r.full_name+".","error");
+            clearTimeout(deleteArmedTimer);
+            deleteArmedTimer=setTimeout(()=>{deleteArmed=false; delBtn.textContent="Delete";},10000);
+            return;
+          }
+          clearTimeout(deleteArmedTimer);
+          deleteArmed=false; delBtn.textContent="Delete";
+          try{
+            await request("/repos/"+encodeURIComponent(r.owner.login)+"/"+encodeURIComponent(r.name),{method:"DELETE"});
+            msg($("repoStatus"),"Deleted "+r.full_name+".","ok");
+            if(owner()===r.owner.login && repo()===r.name){
+              $("fileList").innerHTML=""; $("fileEditor").value=""; $("filePath").value="";
+            }
+            await loadRepoPicker();
+          }catch(e){msg($("repoStatus"),"Delete failed: "+explainError(e),"error");}
+        };
+        // Tapping/activating the repo name loads it, same as pressing Edit.
+        // (No timing-based double-tap detection here: for TalkBack users, a single
+        // "activate" gesture is physically a double-tap but already arrives as one
+        // normal click event, so listening for two clicks would break that.)
+        span.setAttribute("role","button");
+        span.setAttribute("tabindex","0");
+        span.style.cursor="pointer";
+        span.onclick=()=>editBtn.click();
+        span.onkeydown=(ev)=>{ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); editBtn.click(); } };
+        li.appendChild(span); li.appendChild(editBtn); li.appendChild(delBtn);
+        list.appendChild(li);
+      });
+    }catch(e){
+      list.innerHTML="<li>Could not load repository list.</li>";
+      msg($("repoStatus"),"Repository list failed to load: "+explainError(e),"error");
+    }
+  }
+
+  $("loadRepoBtn").onclick=async()=>{
+    try{await loadRepo();}catch(e){msg($("repoStatus"),"Load failed: "+explainError(e),"error");}
+  };
+
+  $("diagnose").onclick=async()=>{
+    const out=$("diagnoseOutput"); out.style.display="block"; out.textContent="Running diagnostics…\n";
+    const line=s=>{ out.textContent+=s+"\n"; };
+    if(!token()){ line("1. Token: MISSING. Enter a token above first."); return; }
+    line("1. Token present: yes ("+token().length+" characters).");
+    try{
+      const u=await request("/user");
+      line("2. Token works. Authenticated as: "+u.login);
+    }catch(e){ line("2. Token check FAILED: "+explainError(e)+" (status "+ (e.status||"?") +")"); return; }
+    if(!owner()||!repo()){ line("3. Owner/Repo fields are empty. Fill them in or pick a repo from the list, then try Diagnose again."); return; }
+    line("3. Checking repository: "+owner()+"/"+repo());
+    let repoData;
+    try{
+      repoData=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo()));
+      line("   Found. Full name: "+repoData.full_name+" | Private: "+repoData.private+" | Default branch: "+repoData.default_branch);
+    }catch(e){ line("   FAILED: "+explainError(e)+" (status "+ (e.status||"?") +"). Check owner/repo spelling and capitalization exactly as on GitHub."); return; }
+    const branch=repoData.default_branch||"main";
+    line("4. Checking file tree on branch \""+branch+"\"…");
+    try{
+      const tree=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/git/trees/"+encodeURIComponent(branch)+"?recursive=1");
+      const count=(tree.tree||[]).filter(x=>x.type==="blob").length;
+      line("   Success. File count found by the API: "+count);
+      if(count===0) line("   The API itself reports zero files on this branch — the repository really is empty on GitHub's side, not a tool display bug.");
+      else{
+        line("   Sample paths:");
+        (tree.tree||[]).filter(x=>x.type==="blob").slice(0,8).forEach(x=>line("     - "+x.path));
+      }
+    }catch(e){ line("   FAILED: "+explainError(e)+" (status "+ (e.status||"?") +")."); return; }
+    line("Diagnosis complete.");
+  };
+
+  $("createRepo").onclick=async()=>{
+    if(!token()){alert("Connect first.");return;}
+    const name=repo();
+    if(!name){alert("Enter a repository name.");$("repo").focus();return;}
+    if(!confirm("Create the repository '"+name+"' on GitHub now?")) return;
+    try{
+      const body={name,description:"Project managed with Accessible GitHub APK Builder",private:false,auto_init:true};
+      const r=await request("/user/repos",{method:"POST",body:JSON.stringify(body)});
+      $("owner").value=r.owner.login; repoDefaultBranch=r.default_branch||"main";
+      msg($("repoStatus"),"Repository created. Default branch: "+repoDefaultBranch,"ok");
+      await refreshFiles();
+    }catch(e){msg($("repoStatus"),"Create failed: "+explainError(e),"error");}
+  };
+
+  async function loadRepo(){
+    if(!needConnection())return;
+    const r=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo()));
+    repoDefaultBranch=r.default_branch||"main";
+    msg($("repoStatus"),"Loaded "+r.full_name+" on branch "+repoDefaultBranch+".","ok");
+    $("repoListSection").style.display="none";
+    $("repoPanel").style.display="block";
+    $("repoPanelTitle").textContent=r.full_name;
+    await refreshFiles();
+    await refreshBuild();
+  }
+
+  $("closeRepoPanel").onclick=()=>{
+    $("repoPanel").style.display="none";
+    $("repoListSection").style.display="block";
+  };
+
+  let deleteCurrentArmed=false, deleteCurrentTimer=null;
+  $("deleteThisRepo").onclick=async()=>{
+    if(!needConnection())return;
+    if(!deleteCurrentArmed){
+      deleteCurrentArmed=true;
+      $("deleteThisRepo").textContent="Tap again to confirm delete";
+      msg($("repoStatus"),"Tap Delete this repository once more within 10 seconds to permanently delete it.","error");
+      clearTimeout(deleteCurrentTimer);
+      deleteCurrentTimer=setTimeout(()=>{deleteCurrentArmed=false; $("deleteThisRepo").textContent="Delete this repository";},10000);
+      return;
+    }
+    clearTimeout(deleteCurrentTimer);
+    deleteCurrentArmed=false; $("deleteThisRepo").textContent="Delete this repository";
+    try{
+      await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo()),{method:"DELETE"});
+      msg($("repoStatus"),"Deleted "+owner()+"/"+repo()+".","ok");
+      $("repoPanel").style.display="none";
+      $("repoListSection").style.display="block";
+      $("fileList").innerHTML=""; $("fileEditor").value=""; $("filePath").value="";
+      await loadRepoPicker();
+    }catch(e){msg($("repoStatus"),"Delete failed: "+explainError(e),"error");}
+  };
+
+
+
+  $("fileInput").onchange=()=>{
+    const files=$("fileInput").files;
+    msg($("uploadStatus"),files.length?("Selected "+files.length+" file(s)."):"No files selected.");
+  };
+
+  // Folders that are never meant to be committed to GitHub for an Android
+  // project: build caches, IDE state, version-control internals. Zipping a
+  // whole project folder on a phone very easily sweeps these in too, and
+  // .gradle/ alone can be thousands of tiny cache files - uploading each as
+  // its own API call is what most often trips GitHub's rate limit and makes
+  // an upload fail partway through for no reason the person can see. Paths
+  // are matched as whole path segments (with slashes on both sides) so this
+  // never accidentally matches a real project file that merely contains one
+  // of these words, e.g. "app/build.gradle.kts" is NOT skipped - only an
+  // actual build/ or .gradle/ *folder* anywhere in the path is.
+  const JUNK_FOLDER_RE=/(^|\/)(\.git|\.gradle|\.idea|build|node_modules|__pycache__)\//;
+  // GitHub's Git Data API (blobs) rejects any single file over 100 MB, and
+  // base64-encoding something that large in the browser first is likely to
+  // freeze a phone's browser tab well before that API call even happens.
+  // Skipping it up front with a clear reason beats letting either of those
+  // failures show up as a cryptic mid-upload error.
+  const MAX_UPLOAD_FILE_BYTES=100*1024*1024;
+
+  // Shared by ZIP/file upload, pasted-text upload, and fetch-from-URL upload: does the actual
+  // commit, reports a consistent status message, refreshes the file list, and (if the checkbox
+  // is on) starts the build — so all three ways of getting files in behave identically and only
+  // need to be tested once.
+  async function commitFiles(files,noteSuffix){
+    const commitMsg=$("commitMessage").value.trim()||"Upload files";
+    msg($("uploadStatus"),"Prepared "+files.length+" file(s)"+(noteSuffix?" ("+noteSuffix+")":"")+". Uploading…");
+    const failed=await uploadAllFiles(files,commitMsg);
+    const okCount=files.length-failed.length;
+    if(failed.length){
+      const list=failed.slice(0,8).map(f=>f.path+" — "+f.reason).join("\n")+(failed.length>8?"\n…and "+(failed.length-8)+" more":"");
+      msg($("uploadStatus"),okCount+" of "+files.length+" file(s) are saved to GitHub already"+(noteSuffix?" ("+noteSuffix+")":"")+". "+failed.length+" file(s) still need to be uploaded — select just those and try again:\n"+list,"error");
+    }else{
+      msg($("uploadStatus"),"Upload complete: "+files.length+" file(s) are now in GitHub"+(noteSuffix?" ("+noteSuffix+")":"")+".","ok");
+    }
+    await refreshFiles();
+    if($("autoBuildAfterUpload").checked){
+      msg($("uploadStatus"),"Upload complete. Starting build automatically…","ok");
+      $("build").click();
+    }
+  }
+
+  async function findExistingPathsByName(filename){
+    // Phones commonly rename a repeat download to "name (1).ext", "name(2).ext" etc. Strip
+    // that suffix before matching, or a re-downloaded file never matches its real counterpart
+    // in the repo and silently lands as a new, wrongly-named file at the root instead.
+    const normalized=filename.replace(/\s*\(\d+\)(?=\.[^.]*$|$)/,"");
+    const lower=normalized.toLowerCase();
+    try{
+      const tree=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/git/trees/"+encodeURIComponent(repoDefaultBranch)+"?recursive=1");
+      return (tree.tree||[]).filter(e=>e.type==="blob" && e.path.split("/").pop().toLowerCase()===lower).map(e=>e.path);
+    }catch(e){
+      return []; // empty repo, or lookup failed — fall back to treating it as a new root file.
+    }
+  }
+
+  $("uploadZip").onclick=async()=>{
+    if(!needConnection())return;
+    const picked=Array.from($("fileInput").files||[]);
+    if(picked.length===0){alert("Choose at least one file first.");return;}
+    try{
+      msg($("uploadStatus"),"Reading selected file(s)…");
+      extractedFiles=[];
+      let skippedJunk=0, skippedTooBig=[];
+      for(const f of picked){
+        const isZip=/\.zip$/i.test(f.name);
+        if(isZip){
+          if(typeof JSZip==="undefined"){msg($("uploadStatus"),"ZIP library did not load. Check internet connection and reload.","error");return;}
+          const z=await JSZip.loadAsync(f);
+          const names=Object.keys(z.files).filter(n=>!z.files[n].dir && !n.startsWith("__MACOSX/"));
+          for(const n of names){
+            const cleanPath=n.replace(/^\.\/+/,"");
+            if(JUNK_FOLDER_RE.test(cleanPath)){ skippedJunk++; continue; }
+            const bytes=await z.files[n].async("uint8array");
+            if(bytes.length>MAX_UPLOAD_FILE_BYTES){ skippedTooBig.push(cleanPath); continue; }
+            extractedFiles.push({path:cleanPath,bytes});
+          }
+        }else{
+          if(f.size>MAX_UPLOAD_FILE_BYTES){ skippedTooBig.push(f.name); continue; }
+          // Non-ZIP files upload as-is, keeping their sub-folder if the browser reports one.
+          const buf=await f.arrayBuffer();
+          const typedPath=$("uploadTargetPath").value.trim();
+          let relPath;
+          if(picked.length===1 && typedPath){
+            // Person typed an exact path themselves — that always wins.
+            relPath=typedPath;
+          }else if(picked.length===1 && f.webkitRelativePath && f.webkitRelativePath.length){
+            relPath=f.webkitRelativePath;
+          }else if(picked.length===1){
+            // A single loose file (e.g. from Downloads) carries no folder info at all — the
+            // browser only reports webkitRelativePath when a whole folder was picked. Without
+            // it, a file meant to replace something nested (like
+            // gradle/wrapper/gradle-wrapper.properties) used to land at the repo root under
+            // just its filename — a new stray file, not a replacement. So: look up the repo's
+            // existing files and, if one (and only one) already has this exact filename
+            // anywhere in the tree, replace it there automatically.
+            msg($("uploadStatus"),"Checking where "+f.name+" already exists in the repo…");
+            const matches=await findExistingPathsByName(f.name);
+            if(matches.length===1){
+              relPath=matches[0];
+              $("uploadTargetPath").value=relPath;
+              msg($("uploadStatus"),"Found it at "+relPath+" — will replace that file.");
+            }else if(matches.length>1){
+              $("uploadTargetPath").value=matches[0];
+              msg($("uploadStatus"),f.name+" exists in "+matches.length+" places:\n"+matches.join("\n")+"\nEdit the path box above to the one you mean, then tap Upload again.","error");
+              return;
+            }else{
+              relPath=f.name.replace(/\s*\(\d+\)(?=\.[^.]*$|$)/,""); // no match — new file, but with a clean name.
+            }
+          }else{
+            relPath=(f.webkitRelativePath && f.webkitRelativePath.length)?f.webkitRelativePath:f.name;
+          }
+          const cleanPath=relPath.replace(/^\.\/+/,"").replace(/^\/+/,"");
+          if(JUNK_FOLDER_RE.test(cleanPath)){ skippedJunk++; continue; }
+          extractedFiles.push({path:cleanPath,bytes:new Uint8Array(buf)});
+        }
+      }
+      if(extractedFiles.length===0){
+        msg($("uploadStatus"),"Nothing to upload — every file was skipped ("+skippedJunk+" junk, "+skippedTooBig.length+" too large). Check that the ZIP actually has project files in it.","error");
+        return;
+      }
+      const notes=[];
+      if(skippedJunk) notes.push("skipped "+skippedJunk+" junk file(s) from .git/.gradle/.idea/build/node_modules folders");
+      if(skippedTooBig.length) notes.push("skipped "+skippedTooBig.length+" file(s) over 100 MB: "+skippedTooBig.slice(0,5).join(", ")+(skippedTooBig.length>5?", …":""));
+      await commitFiles(extractedFiles,notes.join("; "));
+    }catch(e){msg($("uploadStatus"),"Upload failed: "+explainError(e),"error");}
+  };
+
+  // ---- Paste text instead of choosing files ----
+  // Recognizes the "=== FILE: path/to/file ===" marker format (the same format this tool's
+  // companion Claude chat produces when it hands someone a single big text dump of a whole
+  // project) and splits it back into individual files automatically. Any decorative
+  // "====...====" separator lines around a marker, and blank lines right after it or right
+  // before the next one, are stripped so they don't end up inside the file content.
+  function parseMultiFileText(text){
+    const lines=text.split(/\r\n|\r|\n/);
+    const isDecorative=l=>/^=+\s*$/.test(l.trim());
+    const markerRe=/^===\s*FILE:\s*(.+?)\s*===\s*$/;
+    const markers=[];
+    lines.forEach((l,i)=>{ const m=l.match(markerRe); if(m) markers.push({index:i,path:m[1].trim()}); });
+    if(markers.length===0) return null; // not multi-file format — caller falls back to single-file mode.
+    const files=[];
+    for(let k=0;k<markers.length;k++){
+      let start=markers[k].index+1;
+      while(start<lines.length && (lines[start].trim()===""||isDecorative(lines[start]))) start++;
+      let end=(k+1<markers.length)?markers[k+1].index:lines.length;
+      while(end>start && (lines[end-1].trim()===""||isDecorative(lines[end-1]))) end--;
+      files.push({path:markers[k].path,content:lines.slice(start,end).join("\n")});
+    }
+    return files;
+  }
+
+  $("uploadPaste").onclick=async()=>{
+    if(!needConnection())return;
+    const text=$("pasteArea").value;
+    if(!text||!text.trim()){alert("Paste some text into the box first.");return;}
+    try{
+      const multi=parseMultiFileText(text);
+      let files, note;
+      if(multi){
+        files=multi.map(f=>({path:f.path,bytes:new TextEncoder().encode(f.content)}));
+        note="split into "+files.length+" file(s) from === FILE: === markers";
+      }else{
+        const p=$("pastePath").value.trim();
+        if(!p){alert("No === FILE: path === markers were found, so this will be uploaded as one file — enter a file path for it first.");$("pastePath").focus();return;}
+        files=[{path:p,bytes:new TextEncoder().encode(text)}];
+        note="single file from pasted text";
+      }
+      await commitFiles(files,note);
+    }catch(e){msg($("uploadStatus"),"Paste upload failed: "+explainError(e),"error");}
+  };
+
+  // ---- One-tap Android build workflow ----
+  // The exact same build.yml content shared earlier, baked into the tool itself so it never
+  // has to be copy-pasted by hand again. JDK 17 + an explicit Gradle version (installed via
+  // gradle/actions/setup-gradle, so no gradlew wrapper is required in the repo) matches what
+  // Android Gradle Plugin 8.x needs; adjust gradle-version here if a project needs a different one.
+  // The exact same build.yml content shared earlier, baked into the tool itself so it never
+  // has to be copy-pasted by hand again. JDK 17 + an explicit Gradle version (installed via
+  // gradle/actions/setup-gradle, so no gradlew wrapper is required in the repo) matches what
+  // Android Gradle Plugin 8.x needs; adjust gradle-version here if a project needs a different one.
+  // subfolder support: many ZIP uploads land with the whole project one level down (e.g. a
+  // top-level "MyApp/" folder from how the ZIP was originally packed) instead of at the repo
+  // root — gradle's -p flag points the build there without requiring any files to be moved.
+  function buildWorkflowYaml(subfolder){
+    const clean=(subfolder||"").trim().replace(/^\/+|\/+$/g,"");
+    const gradleCmd=clean?("gradle -p "+clean+" assembleDebug --stacktrace"):"gradle assembleDebug --stacktrace";
+    const apkPath=(clean?clean+"/":"")+"app/build/outputs/apk/debug/*.apk";
+    // Downloading the full raw build log from inside a browser page is unreliable: GitHub's
+    // log-download endpoint redirects to blob storage on a different domain that does not
+    // allow cross-origin reads, so a browser fetch() there fails with "Failed to fetch" no
+    // matter what the token can do — that is a browser security rule, not something any
+    // permission fixes. The fix instead is to never need that endpoint: this step captures its
+    // own failure output and re-emits the key error lines as "::error::" annotations, which
+    // GitHub attaches to the run via its normal Checks API — the same same-origin, CORS-friendly
+    // endpoint this tool already uses successfully for the warning messages.
+    return `name: Build Debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.13
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set +e
+          ${gradleCmd} 2>&1 | tee build_output.log
+          status=\${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -iE "error|exception|FAILURE|Could not|^e: " build_output.log | tail -n 40 > errors_only.log || true
+            if [ -s errors_only.log ]; then
+              while IFS= read -r line; do
+                escaped=$(printf '%s' "$line" | sed 's/%/%25/g; s/\\r/%0D/g')
+                echo "::error::$escaped"
+              done < errors_only.log
+            else
+              echo "::error::Build failed with exit code $status but no obvious error line was found in the output — the full log will be needed."
+            fi
+            exit 1
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: ${apkPath}
+`;
+  }
+
+  // Finds the Android/Gradle project root automatically by scanning the whole repo tree for a
+  // settings.gradle(.kts) or build.gradle(.kts) file — whichever is closest to the repo root
+  // wins, since ZIP uploads sometimes nest the real project one folder down. This is what
+  // removes the need to ever type a subfolder name by hand.
+  async function detectGradleSubfolder(){
+    const base=repoDefaultBranch;
+    const repoPath="/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo());
+    const tree=await request(repoPath+"/git/trees/"+encodeURIComponent(base)+"?recursive=1");
+    const candidates=(tree.tree||[])
+      .filter(t=>t.type==="blob" && /(^|\/)(settings\.gradle(\.kts)?|build\.gradle(\.kts)?)$/.test(t.path));
+    if(candidates.length===0) return null; // caller decides what to do when nothing is found.
+    candidates.sort((a,b)=>a.path.split("/").length-b.path.split("/").length);
+    const best=candidates[0].path;
+    const slash=best.lastIndexOf("/");
+    return slash===-1?"":best.slice(0,slash); // "" means the project is at the repo root.
+  }
+
+  $("addWorkflow").onclick=async()=>{
+    if(!needConnection())return;
+    try{
+      msg($("uploadStatus"),"Looking for the Android project inside the repository…");
+      const found=await detectGradleSubfolder();
+      if(found===null){
+        msg($("uploadStatus"),"Could not find a build.gradle(.kts) or settings.gradle(.kts) file anywhere in the repository, so the build workflow was not added. Upload the project files first.","error");
+        return;
+      }
+      $("gradleSubfolder").value=found;
+      $("detectedSubfolderNote").textContent=found?("Found the Android project inside the \""+found+"\" folder."):"Found the Android project at the repository's root.";
+      const yaml=buildWorkflowYaml(found);
+      await commitFiles(
+        [{path:".github/workflows/build.yml",bytes:new TextEncoder().encode(yaml)}],
+        found?("project detected in "+found):"project detected at repo root"
+      );
+    }catch(e){msg($("uploadStatus"),"Adding the workflow failed: "+explainError(e),"error");}
+  };
+
+  // ---- Fetch a file from a link ----
+  // Best-effort only: this runs in the browser, so it is subject to the same-origin/CORS rules
+  // every website enforces. It will work for links that explicitly allow cross-site fetching
+  // (e.g. GitHub's own "raw" file links) and will fail for most ordinary web pages — that
+  // failure is the browser protecting the site, not a bug here. The error message says so and
+  // points back to the paste-text option, which always works because nothing is fetched.
+  $("uploadUrl").onclick=async()=>{
+    if(!needConnection())return;
+    const url=$("fetchUrl").value.trim();
+    if(!url){alert("Enter a link first.");$("fetchUrl").focus();return;}
+    try{
+      msg($("uploadStatus"),"Trying to fetch the link…");
+      const r=await fetch(url);
+      if(!r.ok) throw new Error("The link responded with HTTP "+r.status+".");
+      const buf=await r.arrayBuffer();
+      let p=$("pastePath").value.trim();
+      if(!p){
+        try{ p=decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop()||"downloaded-file"); }
+        catch{ p="downloaded-file"; }
+      }
+      if(/\.zip$/i.test(p)){
+        msg($("uploadStatus"),"Link looks like a ZIP — unpacking it into its files…");
+        const {files,skippedJunk,skippedTooBig}=await extractZipBuffer(buf);
+        if(files.length===0){
+          msg($("uploadStatus"),"The ZIP had nothing usable in it ("+skippedJunk+" junk, "+skippedTooBig.length+" too large).","error");
+          return;
+        }
+        const notes=[];
+        if(skippedJunk) notes.push("skipped "+skippedJunk+" junk file(s)");
+        if(skippedTooBig.length) notes.push("skipped "+skippedTooBig.length+" file(s) over 100 MB");
+        await commitFiles(files,"unpacked from link"+(notes.length?"; "+notes.join("; "):""));
+      }else{
+        await commitFiles([{path:p,bytes:new Uint8Array(buf)}],"fetched from link");
+      }
+    }catch(e){
+      msg($("uploadStatus"),"Could not fetch that link: "+explainError(e)+" — many sites (Google Drive, Dropbox, most ordinary web pages) block this from working in a browser page, a CORS restriction the site itself enforces — this is not a bug here. It works reliably for direct raw-file links (e.g. GitHub's own \"raw\" links). Otherwise use \"Paste text\" or \"Upload files\" instead.","error");
+    }
+  };
+
+  function bytesToBase64(bytes){
+    let s=""; const chunk=0x8000;
+    for(let i=0;i<bytes.length;i+=chunk) s+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+    return btoa(s);
+  }
+  async function uploadAllFiles(files,commitMsg){
+    // Use the Git Data API so a ZIP becomes one atomic commit instead of dozens of GitHub editor commits.
+    const base=repoDefaultBranch;
+    const repoPath="/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo());
+
+    // A brand-new, truly empty repository has zero commits and zero branches. GitHub's docs
+    // are explicit about this: on an empty repo, EVERY Git Data API call (blobs, trees,
+    // commits — not just the ref lookup) returns 409 "Git Repository is empty." The only
+    // endpoint that is allowed to touch an empty repo is the older Contents API
+    // (PUT /repos/.../contents/{path}), which GitHub's own docs say must be used to
+    // "initialize the repository so you can use the API to manage the Git database."
+    // The previous version of this function only special-cased the ref lookup, then went
+    // straight on to POST /git/blobs — which still 409s on a truly empty repo, and that
+    // failure wasn't caught, so it surfaced as a raw "Upload failed: HTTP 409" to the user.
+    let baseTreeSha=null, parentSha=null, isEmptyRepo=false;
+    try{
+      const ref=await request(repoPath+"/git/ref/heads/"+encodeURIComponent(base));
+      const baseSha=ref.object.sha;
+      const commit=await request(repoPath+"/git/commits/"+baseSha);
+      baseTreeSha=commit.tree.sha;
+      parentSha=commit.sha;
+    }catch(e){
+      if(e.status===404 || e.status===409 || /empty|git repository is empty/i.test(explainError(e))){
+        isEmptyRepo=true; // no branch/commit exists yet.
+      }else{
+        throw e;
+      }
+    }
+
+    let remainingFiles=files;
+    if(isEmptyRepo){
+      // Bootstrap the repository with its very first file via the Contents API — this is the
+      // one call GitHub allows on an empty repo, and it creates the initial commit and branch
+      // for us. Everything else in this batch is then added on top via the normal Git Data API.
+      msg($("uploadStatus"),"Repository is empty — creating the first file to initialize it…");
+      const first=files[0];
+      const initBody={message:commitMsg,content:bytesToBase64(first.bytes),branch:base};
+      const initResp=await request(repoPath+"/contents/"+first.path.split("/").map(encodeURIComponent).join("/"),{method:"PUT",body:JSON.stringify(initBody)});
+      baseTreeSha=initResp.commit.tree.sha;
+      parentSha=initResp.commit.sha;
+      remainingFiles=files.slice(1);
+      if(remainingFiles.length===0) return []; // that one file was the whole upload — done, nothing failed.
+      msg($("uploadStatus"),"Repository initialized. Uploading the remaining "+remainingFiles.length+" file(s)…");
+    }
+
+    // Committing everything in ONE big tree+commit at the very end meant that if that final
+    // tree/commit/ref-update step failed (or the browser tab died) after every single blob
+    // had already uploaded fine, none of it actually landed on GitHub — the branch never
+    // moved, so the person had to redo the entire selection from scratch. Committing in small
+    // batches instead means each batch that succeeds is pushed to the branch right away: if a
+    // later batch fails, everything before it is already permanently saved, and only the
+    // failed batch's files need to be picked up again.
+    const BATCH_SIZE=15;
+    const failedBlobs=[];
+    let totalCommitted=0;
+    for(let start=0;start<remainingFiles.length;start+=BATCH_SIZE){
+      const batch=remainingFiles.slice(start,start+BATCH_SIZE);
+      const blobs=[];
+      for(let i=0;i<batch.length;i++){
+        msg($("uploadStatus"),"Uploading "+(start+i+1)+"/"+remainingFiles.length+": "+batch[i].path+"…");
+        try{
+          const b=await requestWithRetry(repoPath+"/git/blobs",{method:"POST",body:JSON.stringify({content:bytesToBase64(batch[i].bytes),encoding:"base64"})});
+          blobs.push({path:batch[i].path,mode:"100644",type:"blob",sha:b.sha});
+        }catch(e){
+          // One stubborn file (bad path, oversized blob, a lingering block) no longer takes
+          // the rest of the batch down with it — recorded here, and everything else continues.
+          failedBlobs.push({path:batch[i].path,reason:explainError(e)});
+        }
+        // A small pause after every file keeps steady, spaced-out requests — far less likely
+        // to trip GitHub's secondary rate limit than firing dozens back to back.
+        await sleep(300);
+      }
+      if(blobs.length===0) continue; // whole batch failed — nothing to commit for it, move on.
+      const treeBody={base_tree:baseTreeSha,tree:blobs};
+      const tree=await request(repoPath+"/git/trees",{method:"POST",body:JSON.stringify(treeBody)});
+      const commitBody={message:commitMsg+(remainingFiles.length>BATCH_SIZE?" (part "+(Math.floor(start/BATCH_SIZE)+1)+")":""),tree:tree.sha,parents:[parentSha]};
+      const c=await request(repoPath+"/git/commits",{method:"POST",body:JSON.stringify(commitBody)});
+      await request(repoPath+"/git/refs/heads/"+encodeURIComponent(base),{method:"PATCH",body:JSON.stringify({sha:c.sha,force:false})});
+      // This batch is now permanently on the branch — the next batch builds on top of it.
+      baseTreeSha=tree.sha; parentSha=c.sha;
+      totalCommitted+=blobs.length;
+    }
+    if(totalCommitted===0 && failedBlobs.length){
+      throw new Error("All "+remainingFiles.length+" file(s) failed to upload. First error: "+failedBlobs[0].reason);
+    }
+    return failedBlobs;
+  }
+
+  $("refreshFiles").onclick=async()=>{try{await refreshFiles();}catch(e){msg($("repoStatus"),"File refresh failed: "+explainError(e),"error");}};
+  async function refreshFiles(){
+    if(!needConnection())return;
+    const tree=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/git/trees/"+encodeURIComponent(repoDefaultBranch)+"?recursive=1");
+    const ul=$("fileList"); ul.innerHTML="";
+    (tree.tree||[]).filter(x=>x.type==="blob").forEach(x=>{
+      const li=document.createElement("li"), b=document.createElement("button");
+      b.textContent=x.path; b.onclick=()=>openFile(x.path);
+      li.appendChild(b); ul.appendChild(li);
+    });
+    msg($("repoStatus"),"Loaded "+((tree.tree||[]).filter(x=>x.type==="blob").length)+" files.","ok");
+  }
+
+  async function openFile(path){
+    try{
+      const f=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/contents/"+path+"?ref="+encodeURIComponent(repoDefaultBranch));
+      selectedFileSha=f.sha; $("filePath").value=f.path;
+      $("fileEditor").value=f.encoding==="base64"?decodeBase64Utf8(f.content):f.content;
+      $("fileEditor").focus();
+      msg($("repoStatus"),"Editing "+f.path+".","ok");
+    }catch(e){msg($("repoStatus"),"Could not open file: "+explainError(e),"error");}
+  }
+  function decodeBase64Utf8(s){
+    const bin=atob(s.replace(/\n/g,"")); const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+    try{return new TextDecoder().decode(bytes);}catch{return bin;}
+  }
+  $("newFile").onclick=()=>{selectedFileSha=null;$("filePath").value="";$("fileEditor").value="";$("filePath").focus();msg($("repoStatus"),"New file mode. Enter a path and contents.");};
+
+  $("saveFile").onclick=async()=>{
+    if(!needConnection())return;
+    const path=$("filePath").value.trim(); if(!path){alert("Enter a file path.");return;}
+    try{
+      const body={message:(selectedFileSha?"Update ":"Create ")+path,content:bytesToBase64(new TextEncoder().encode($("fileEditor").value)),branch:repoDefaultBranch};
+      if(selectedFileSha) body.sha=selectedFileSha;
+      const r=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/contents/"+path,{method:"PUT",body:JSON.stringify(body)});
+      selectedFileSha=r.content.sha;
+      msg($("repoStatus"),"Saved "+path+".","ok"); await refreshFiles();
+    }catch(e){msg($("repoStatus"),"Save failed: "+explainError(e),"error");}
+  };
+
+  $("deleteFile").onclick=async()=>{
+    if(!needConnection())return;
+    const path=$("filePath").value.trim(); if(!path||!selectedFileSha){alert("Open an existing file first.");return;}
+    if(!confirm("Delete "+path+"?"))return;
+    try{
+      await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/contents/"+path,{method:"DELETE",body:JSON.stringify({message:"Delete "+path,sha:selectedFileSha,branch:repoDefaultBranch})});
+      selectedFileSha=null;$("filePath").value="";$("fileEditor").value="";
+      msg($("repoStatus"),"Deleted "+path+".","ok"); await refreshFiles();
+    }catch(e){msg($("repoStatus"),"Delete file failed: "+explainError(e),"error");}
+  };
+
+  let autoPollTimer=null;
+  let autoPollAttempts=0;
+  const AUTO_POLL_INTERVAL_MS=8000;     // well within GitHub's 5,000/hour token limit even run continuously
+  const AUTO_POLL_MAX_ATTEMPTS=120;     // ~16 minutes ceiling so a stuck run doesn't poll forever
+
+  function stopAutoPoll(){
+    if(autoPollTimer){ clearTimeout(autoPollTimer); autoPollTimer=null; }
+  }
+
+  // Runs right after a build is started: checks status every few seconds and announces out loud
+  // the moment anything changes, so there is nothing to tap and nothing to remember to check.
+  function startAutoPoll(){
+    stopAutoPoll();
+    autoPollAttempts=0;
+    let lastAnnounced=null;
+    const tick=async()=>{
+      autoPollAttempts++;
+      try{
+        await refreshBuild();
+        const run=latestRun;
+        if(run){
+          const stateKey=run.status+"/"+(run.conclusion||"");
+          if(stateKey!==lastAnnounced){
+            lastAnnounced=stateKey;
+            if(run.status==="completed"){
+              if(run.conclusion==="success"){
+                msg($("buildStatus"),"Build finished successfully. The APK is ready — tap \"Open APK artifact page\" to get it.","ok");
+              }else{
+                // Build failed: automatically fetch AND copy the errors, no extra tap needed.
+                msg($("buildStatus"),"Build failed. Reading and copying the errors now…","error");
+                await autoFetchAndCopyErrors();
+                await tryGeminiAutoFix();
+              }
+              stopAutoPoll();
+              return;
+            }else{
+              msg($("buildStatus"),"Build is "+(run.status==="queued"?"queued, waiting for a runner":"in progress")+"… (checking automatically, no need to tap anything)");
+            }
+          }
+        }
+      }catch(e){
+        msg($("buildStatus"),"Automatic status check failed: "+explainError(e)+" — tap \"Refresh build status\" to try manually.","error");
+        stopAutoPoll();
+        return;
+      }
+      if(autoPollAttempts<AUTO_POLL_MAX_ATTEMPTS){
+        autoPollTimer=setTimeout(tick,AUTO_POLL_INTERVAL_MS);
+      }else{
+        msg($("buildStatus"),"Still not finished after a while — tap \"Refresh build status\" to keep checking.","");
+      }
+    };
+    autoPollTimer=setTimeout(tick,AUTO_POLL_INTERVAL_MS);
+  }
+
+  $("build").onclick=()=>startBuild(true);
+  // isManual=true resets the Gemini auto-fix attempt counter (a person tapping the button
+  // themselves is a fresh attempt); isManual=false is used by the auto-fix flow itself when it
+  // re-triggers a build after pushing a fix, which must NOT reset the counter or the 3-try
+  // ceiling would never be reached.
+  async function startBuild(isManual){
+    if(isManual) autoFixAttempts=0;
+    if(!needConnection())return;
+    try{
+      const wf=await pickWorkflow();
+      if(!wf) return;
+      await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/workflows/"+wf.id+"/dispatches",{method:"POST",body:JSON.stringify({ref:repoDefaultBranch})});
+      msg($("buildStatus"),"Build started using workflow \""+wf.name+"\". GitHub Actions is compiling — checking automatically, you don't need to tap anything else.","ok");
+      startAutoPoll();
+    }catch(e){msg($("buildStatus"),"Build start failed: "+explainError(e),"error");}
+  }
+
+  let workflowChoiceCache=null;
+  async function pickWorkflow(){
+    // Auto-detect: list every workflow actually defined in the repo instead of guessing a filename.
+    const d=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/workflows?per_page=100");
+    const list=(d.workflows||[]).filter(w=>w.state==="active");
+    if(list.length===0){
+      msg($("buildStatus"),"No workflow files found in this repository's .github/workflows folder. Add one on GitHub first, then try again.","error");
+      return null;
+    }
+    if(list.length===1) return list[0];
+    if(workflowChoiceCache && list.some(w=>w.id===workflowChoiceCache)) return list.find(w=>w.id===workflowChoiceCache);
+    const names=list.map((w,i)=>(i+1)+". "+w.name+"  ("+w.path.split("/").pop()+")").join("\n");
+    const pick=prompt("This repository has multiple workflows. Type the number of the one to run for the build:\n"+names,"1");
+    const idx=parseInt(pick,10)-1;
+    if(isNaN(idx)||idx<0||idx>=list.length){ msg($("buildStatus"),"Build cancelled: no valid workflow chosen.","error"); return null; }
+    workflowChoiceCache=list[idx].id;
+    return list[idx];
+  }
+
+  // GitHub's Android app registers itself as the default handler ("App Link") for github.com
+  // URLs. That means a plain window.open("https://github.com/...") on an Android phone often
+  // gets intercepted and opened inside the GitHub app's own in-page browser instead of Chrome —
+  // and that in-app browser only offers Share/Back/Forward, not a real download. Building an
+  // "intent://" URL with an explicit package name forces Android to hand the link to Chrome
+  // specifically, skipping the App Link chooser, so the artifact ZIP downloads normally.
+  function isAndroid(){ return /Android/i.test(navigator.userAgent||""); }
+  function openPreferringChrome(url){
+    if(isAndroid()){
+      const noScheme=url.replace(/^https?:\/\//,"");
+      const intentUrl="intent://"+noScheme+"#Intent;scheme=https;package=com.android.chrome;end";
+      const a=document.createElement("a");
+      a.href=intentUrl;
+      a.rel="noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }else{
+      window.open(url,"_blank","noopener");
+    }
+  }
+  $("refreshBuild").onclick=async()=>{try{await refreshBuild();}catch(e){msg($("buildStatus"),"Build status failed: "+explainError(e),"error");}};
+  async function refreshBuild(){
+    if(!needConnection())return;
+    const d=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/runs?per_page=10");
+    const run=(d.workflow_runs||[])[0];
+    if(!run){msg($("buildStatus"),"No GitHub Actions run found yet.");return;}
+    latestRun=run;
+    msg($("buildStatus"),"Latest build: "+run.status+(run.conclusion?(" / "+run.conclusion):"")+" — "+run.name+" — run #"+run.run_number,run.conclusion==="success"?"ok":(run.conclusion==="failure"?"error":""));
+    $("downloadApk").disabled=run.conclusion!=="success";
+    $("openRunPage").disabled=false;
+  }
+  // Opens the run directly on github.com, where the browser's own logged-in session (not a
+  // JS fetch) loads the log — this sidesteps the CORS/redirect limitation that can make the
+  // automatic "Get & copy build errors" full-log fallback fail on some mobile browsers.
+  $("openRunPage").onclick=()=>{
+    if(!latestRun)return;
+    openPreferringChrome(latestRun.html_url||("https://github.com/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/runs/"+latestRun.id));
+  };
+
+  // Annotations are short, plain-text error/warning summaries GitHub already computes for each
+  // run (the same ones shown as "N errors and M warnings" on the GitHub website). They come back
+  // as normal JSON from api.github.com, so — unlike the full log ZIP, which redirects to a
+  // separate file-storage domain and gets blocked by the browser (CORS) — this always works here.
+  async function fetchAnnotations(sha){
+    const base="/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo());
+    const checkRuns=await request(base+"/commits/"+encodeURIComponent(sha)+"/check-runs?per_page=100");
+    const out=[];
+    for(const cr of (checkRuns.check_runs||[])){
+      const hasAnnotations=cr.output && cr.output.annotations_count>0;
+      if(cr.conclusion==="failure" || hasAnnotations){
+        try{
+          const anns=await request(base+"/check-runs/"+cr.id+"/annotations?per_page=100");
+          if(anns && anns.length) out.push({job:cr.name,annotations:anns});
+        }catch(e){/* skip a check run we can't read annotations for */}
+      }
+    }
+    return out;
+  }
+
+  // Each item is self-contained (job name folded in) so it can be shown and copied on its own,
+  // one at a time — the previous version joined everything into one giant block, which is
+  // exactly what made TalkBack hang trying to process it in one go.
+  function formatAnnotations(groups){
+    const items=[];
+    for(const g of groups){
+      for(const a of g.annotations){
+        items.push("["+g.job+"] ["+(a.annotation_level||"notice").toUpperCase()+"] "+(a.path?a.path+(a.start_line?" (line "+a.start_line+")":"")+": ":"")+(a.title?a.title+" — ":"")+a.message);
+      }
+    }
+    return items;
+  }
+
+  // Copies text to the clipboard without ever popping up a blocking alert() dialog — status
+  // updates go through the existing aria-live region instead, so a screen reader announces the
+  // result automatically and the person never has to stop and tap "OK" to continue.
+  async function copyToClipboard(text){
+    try{ await navigator.clipboard.writeText(text); return true; }catch{}
+    try{
+      const ta=document.createElement("textarea");
+      ta.value=text;
+      // Off-screen instead of opacity:0 — some mobile browsers refuse to select() text inside
+      // a zero-opacity element, which silently broke copying for long build-log text.
+      ta.style.position="fixed"; ta.style.top="-9999px"; ta.style.left="-9999px";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      ta.setSelectionRange(0,text.length); // some Android WebViews need this in addition to select()
+      const ok=document.execCommand("copy");
+      document.body.removeChild(ta);
+      if(ok) return true;
+    }catch{}
+    return false;
+  }
+
+  // Selecting text out of a plain status <div> is fiddly at the best of times, and worse with
+  // a screen reader — these buttons copy the box's current message in one tap instead. If the
+  // clipboard genuinely can't be reached (common for very long text on some mobile browsers),
+  // no popup — the text appears in a plain textarea right below, ready to long-press and copy.
+  async function copyStatusBox(statusId,fallbackId){
+    const text=$(statusId).textContent;
+    const ok=await copyToClipboard(text);
+    const fb=$(fallbackId);
+    if(ok){
+      fb.style.display="none";
+      msg($(statusId),$(statusId).textContent+"\n\n(Copied to clipboard.)",$(statusId).className.replace("status","").trim());
+    }else{
+      fb.value=text;
+      fb.style.display="block";
+      fb.focus(); fb.select();
+    }
+  }
+  $("copyUploadStatus").onclick=()=>copyStatusBox("uploadStatus","uploadStatusFallback");
+  $("copyBuildStatus").onclick=()=>copyStatusBox("buildStatus","buildStatusFallback");
+
+  // GitHub Actions always adds one of these generic step-failure annotations whenever any step
+  // exits non-zero — even when the real cause (a Gradle/Kotlin compile error, a missing SDK
+  // license, etc.) was printed only to the plain log text, not as its own annotation. Treating
+  // this generic line as if it were "the error" is exactly what left a real failure looking
+  // like nothing more than "Process completed with exit code 1."
+  function isGenericFailureAnnotation(a){
+    return /^process completed with exit code \d+\.?$/i.test((a.message||"").trim());
+  }
+
+  // GitHub can return HTTP 404 for the full log archive for a few seconds right after a run
+  // shows as "completed" — the run itself is done, but GitHub is still packaging the combined
+  // log ZIP in the background. That is a transient GitHub-side delay, not a sign that the logs
+  // don't exist or that this tool did something wrong, so a single failed attempt is not
+  // trustworthy. Retry a few times with a short wait before treating it as a real failure.
+  async function fetchFullBuildLogText(runId){
+    const MAX_ATTEMPTS=4, RETRY_DELAY_MS=4000;
+    let lastStatus=null;
+    for(let attempt=1;attempt<=MAX_ATTEMPTS;attempt++){
+      const r=await fetch(api+"/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/runs/"+runId+"/logs",{headers:headers()});
+      if(r.ok){
+        const blob=await r.blob();
+        const z=await JSZip.loadAsync(blob);
+        const names=Object.keys(z.files).filter(n=>n.endsWith(".txt"));
+        let all="";
+        for(const n of names) all+="\n===== "+n+" =====\n"+await z.files[n].async("text");
+        const lines=all.split(/\r?\n/);
+        const interesting=lines.filter(l=>/error|failed|failure|exception|gradle.*fail|compile.*error|could not|^e:/i.test(l)).map(l=>l.trim()).filter(Boolean);
+        return {items:interesting.length?interesting:all.split(/\r?\n/).slice(-200).filter(Boolean)};
+      }
+      lastStatus=r.status;
+      if(r.status===404 && attempt<MAX_ATTEMPTS){
+        msg($("buildStatus"),"GitHub is still preparing the build log — trying again in a few seconds ("+attempt+"/"+(MAX_ATTEMPTS-1)+")…");
+        await new Promise(res=>setTimeout(res,RETRY_DELAY_MS));
+        continue;
+      }
+      break;
+    }
+    if(lastStatus===404){
+      throw new Error("Could not download build logs (HTTP 404) even after retrying. This usually means either: GitHub is still preparing them (wait about 20-30 seconds, then tap \"Get & copy build errors\" again), or your token doesn't have Actions/workflow read access (open \"More options\" above and reconnect with a token that has it). You can also tap \"Open this build's page on GitHub website\" below to read the log directly there.");
+    }
+    throw new Error("Could not download build logs. HTTP "+lastStatus);
+  }
+
+  // Shared by both the manual "Get & copy build errors" button and the automatic post-failure
+  // handler. Prefers GitHub's short annotation summary, but only trusts it when it contains a
+  // genuine failure/error-level annotation beyond the generic exit-code line — an annotation
+  // set that is only informational "warning"/"notice" items (like the Node.js or setup-java
+  // deprecation notices GitHub adds to every run) does not explain why the build actually
+  // failed, so that case falls back to the full log ZIP too, which always has the real error
+  // text (Gradle/Kotlin compiler output, missing-license messages, etc.) even when GitHub
+  // never turned it into an annotation at all.
+  async function getBuildErrorText(run){
+    const groups=await fetchAnnotations(run.head_sha);
+    const hasRealFailure=groups.some(g=>g.annotations.some(a=>
+      (a.annotation_level==="failure") && !isGenericFailureAnnotation(a)
+    ));
+    if(hasRealFailure){
+      const nonGeneric=groups
+        .map(g=>({job:g.job,annotations:g.annotations.filter(a=>!isGenericFailureAnnotation(a))}))
+        .filter(g=>g.annotations.length);
+      return {items:formatAnnotations(nonGeneric)};
+    }
+    // No annotations at all, or only generic/informational ones (warnings, deprecation
+    // notices) — none of that explains an actual failure. Get the real log instead.
+    // This may fail with a "Failed to fetch" message on some mobile browsers; that failure is
+    // a browser limitation, not a problem with your repository.
+    msg($("buildStatus"),(groups.length?"Only warnings were found, no real failure detail":"No short error summary available")+" — fetching the full build log for the real error…");
+    return await fetchFullBuildLogText(run.id);
+  }
+
+  // One-error-at-a-time state. Showing every error in one box at once is what made TalkBack
+  // hang on long build logs — this keeps the DOM content small no matter how many errors there are.
+  let currentErrors=[];
+  let currentErrorIndex=0;
+
+  function renderCurrentError(){
+    const n=currentErrors.length;
+    if(n===0){
+      $("logs").textContent="No build log loaded.";
+      $("errorNavRow").style.display="none";
+      $("copyCurrentError").style.display="none";
+      return;
+    }
+    $("logs").textContent=currentErrors[currentErrorIndex];
+    $("errorNavRow").style.display="flex";
+    $("copyCurrentError").style.display="inline-block";
+    $("errorPosition").textContent="Error "+(currentErrorIndex+1)+" of "+n;
+    $("prevError").disabled=(currentErrorIndex===0);
+    $("nextError").disabled=(currentErrorIndex===n-1);
+    $("logsFallback").style.display="none";
+  }
+  $("prevError").onclick=()=>{ if(currentErrorIndex>0){ currentErrorIndex--; renderCurrentError(); } };
+  $("nextError").onclick=()=>{ if(currentErrorIndex<currentErrors.length-1){ currentErrorIndex++; renderCurrentError(); } };
+  $("copyCurrentError").onclick=async()=>{
+    const text=currentErrors[currentErrorIndex]||"";
+    const ok=await copyToClipboard(text);
+    if(ok){
+      $("logsFallback").style.display="none";
+      msg($("buildStatus"),"Error "+(currentErrorIndex+1)+" of "+currentErrors.length+" copied to clipboard.","");
+    }else{
+      const fb=$("logsFallback");
+      fb.value=text; fb.style.display="block"; fb.focus(); fb.select();
+    }
+  };
+
+  // One button does the whole job: fetch the errors AND show the first one, in that order, so
+  // there is only ever one thing to tap and one small piece of text to deal with at a time.
+  async function autoFetchAndCopyErrors(){
+    if(!latestRun) await refreshBuild();
+    if(!latestRun) return;
+    const {items}=await getBuildErrorText(latestRun);
+    currentErrors=items; currentErrorIndex=0;
+    renderCurrentError();
+    msg($("buildStatus"),
+      "Build failed. Found "+items.length+" error/warning message(s) — showing one at a time below. Use \"Next error\"/\"Previous error\" to move through them, and \"Copy this one error\" to copy just what's shown.",
+      "error");
+  }
+
+  // ---- Gemini auto-fix ----
+  // Pulls file path(s) out of the error text (GitHub annotations already include a "path"
+  // field, which formatAnnotations folds into the item text; the full-log fallback has paths
+  // embedded in compiler output lines), fetches just those files' current content, asks Gemini
+  // to return corrected versions in the same "=== FILE: path ===" format this tool already
+  // parses for pasted text, then pushes them and starts the build again.
+  function cleanRunnerPath(p){
+    // GitHub Actions logs print paths as the runner sees them, e.g.
+    // /home/runner/work/REPO/REPO/app/src/.../File.kt — strip everything up to and including
+    // the second "/REPO/" so what's left matches a path inside this repository.
+    const marker="/"+repo()+"/"+repo()+"/";
+    const idx=p.indexOf(marker);
+    if(idx>=0) return p.slice(idx+marker.length);
+    return p.replace(/^\/+/,"");
+  }
+  function extractCandidateFilePaths(errorItems){
+    const text=errorItems.join("\n");
+    const re=/[A-Za-z0-9_\-./]+\.(?:kt|kts|java|xml|gradle|properties|toml|pro|cfg)\b/g;
+    const found=new Set();
+    let m;
+    while((m=re.exec(text))){
+      // Skip generic system/toolchain paths (JDK, Gradle cache, Android SDK) — not files in this repo.
+      if(/^\/(usr|opt|tmp)\//.test(m[0]) || /\/(\.gradle|\.android|android-sdk|hostedtoolcache)\//.test(m[0])) continue;
+      found.add(cleanRunnerPath(m[0]));
+    }
+    return Array.from(found).slice(0,6);
+  }
+  async function fetchFileContent(path){
+    try{
+      const f=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/contents/"+path+"?ref="+encodeURIComponent(repoDefaultBranch));
+      return f.encoding==="base64"?decodeBase64Utf8(f.content):f.content;
+    }catch(e){ return null; }
+  }
+  async function callGemini(prompt){
+    const key=geminiKey();
+    if(!key) throw new Error("No Gemini API key set.");
+    const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="+encodeURIComponent(key),{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({contents:[{role:"user",parts:[{text:prompt}]}]})
+    });
+    const data=await r.json().catch(()=>null);
+    if(!r.ok) throw new Error((data&&data.error&&data.error.message)||("Gemini HTTP "+r.status));
+    const parts=data&&data.candidates&&data.candidates[0]&&data.candidates[0].content&&data.candidates[0].content.parts;
+    const text=(parts||[]).map(p=>p.text||"").join("");
+    if(!text) throw new Error("Gemini returned an empty response (it may have refused the request).");
+    return text;
+  }
+  async function tryGeminiAutoFix(){
+    if(!geminiKey()){
+      msg($("geminiFixStatus"),"No Gemini API key set — skipping automatic fixing. Add one above and tap \"Save Gemini key\" to enable it.","");
+      return;
+    }
+    if(autoFixAttempts>=AUTO_FIX_MAX_ATTEMPTS){
+      msg($("geminiFixStatus"),"Stopped after "+AUTO_FIX_MAX_ATTEMPTS+" automatic fix attempts — still failing. Check the errors above yourself, or tap \"Reset auto-fix attempts\" to let it try again.","error");
+      return;
+    }
+    autoFixAttempts++;
+    try{
+      msg($("geminiFixStatus"),"Auto-fix attempt "+autoFixAttempts+" of "+AUTO_FIX_MAX_ATTEMPTS+": reading the error…","");
+      const {items}=await getBuildErrorText(latestRun);
+      if(!items.length){ msg($("geminiFixStatus"),"No error text found to fix.","error"); return; }
+      const errorText=items.slice(0,40).join("\n");
+      const candidates=extractCandidateFilePaths(items);
+      if(candidates.length===0){
+        msg($("geminiFixStatus"),"Could not tell which file(s) the error is about, so automatic fixing was skipped this attempt. Use \"Get & copy build errors\" above to read it yourself.","error");
+        return;
+      }
+      msg($("geminiFixStatus"),"Fetching "+candidates.length+" file(s) that look related: "+candidates.join(", ")+"…","");
+      const fileBlocks=[];
+      for(const p of candidates){
+        const content=await fetchFileContent(p);
+        if(content!==null) fileBlocks.push("=== FILE: "+p+" ===\n"+content);
+      }
+      if(fileBlocks.length===0){
+        msg($("geminiFixStatus"),"None of the file(s) named in the error could be read from the repository, so automatic fixing was skipped this attempt.","error");
+        return;
+      }
+      msg($("geminiFixStatus"),"Asking Gemini to fix "+fileBlocks.length+" file(s)…","");
+      const prompt="You are fixing an Android Gradle build that failed on GitHub Actions. Below is the build error, "+
+        "followed by the current content of the file(s) that appear related to it.\n\n"+
+        "Fix whatever is wrong so the build succeeds. Return ONLY the corrected file(s), each wrapped exactly like this and nothing else — no explanations, no markdown code fences, no commentary before, between, or after them:\n"+
+        "=== FILE: path/exactly/as/shown/below ===\n<the full corrected file content>\n\n"+
+        "Return every file you were given below, even ones you decide don't need any change, in the same format.\n\n"+
+        "--- BUILD ERROR ---\n"+errorText+"\n\n--- FILES ---\n"+fileBlocks.join("\n\n");
+      const responseText=await callGemini(prompt);
+      const fixedFiles=parseMultiFileText(responseText);
+      if(!fixedFiles||fixedFiles.length===0){
+        msg($("geminiFixStatus"),"Gemini's reply could not be read as file content, so nothing was changed this attempt.","error");
+        return;
+      }
+      msg($("geminiFixStatus"),"Got a fix for "+fixedFiles.length+" file(s) — pushing to GitHub…","");
+      const filesToCommit=fixedFiles.map(f=>({path:f.path,bytes:new TextEncoder().encode(f.content)}));
+      const failed=await uploadAllFiles(filesToCommit,"Gemini auto-fix (attempt "+autoFixAttempts+")");
+      await refreshFiles();
+      if(failed.length){
+        msg($("geminiFixStatus"),"Some fixed file(s) failed to push: "+failed.map(f=>f.path+" — "+f.reason).join("; "),"error");
+        return;
+      }
+      msg($("geminiFixStatus"),"Fix pushed (attempt "+autoFixAttempts+" of "+AUTO_FIX_MAX_ATTEMPTS+"). Starting the build again automatically…","ok");
+      await startBuild(false);
+    }catch(e){
+      msg($("geminiFixStatus"),"Auto-fix attempt "+autoFixAttempts+" failed: "+explainError(e),"error");
+    }
+  }
+
+  // ---- Fetch-from-link: unpack a fetched ZIP into its files the same way an uploaded ZIP is ----
+  async function extractZipBuffer(buf){
+    if(typeof JSZip==="undefined") throw new Error("ZIP library did not load. Check internet connection and reload.");
+    const z=await JSZip.loadAsync(buf);
+    const names=Object.keys(z.files).filter(n=>!z.files[n].dir && !n.startsWith("__MACOSX/"));
+    const files=[]; let skippedJunk=0; const skippedTooBig=[];
+    for(const n of names){
+      const cleanPath=n.replace(/^\.\/+/,"");
+      if(JUNK_FOLDER_RE.test(cleanPath)){ skippedJunk++; continue; }
+      const bytes=await z.files[n].async("uint8array");
+      if(bytes.length>MAX_UPLOAD_FILE_BYTES){ skippedTooBig.push(cleanPath); continue; }
+      files.push({path:cleanPath,bytes});
+    }
+    return {files,skippedJunk,skippedTooBig};
+  }
+
+  $("getLogs").onclick=async()=>{
+    if(!needConnection())return;
+    try{
+      if(!latestRun) await refreshBuild();
+      if(!latestRun){return;}
+      msg($("buildStatus"),"Reading build errors…");
+      const {items}=await getBuildErrorText(latestRun);
+      currentErrors=items; currentErrorIndex=0;
+      renderCurrentError();
+      msg($("buildStatus"),
+        items.length?("Found "+items.length+" error/warning message(s) — showing one at a time below."):"No errors found.",
+        items.length?"error":"ok");
+    }catch(e){currentErrors=[];renderCurrentError();msg($("buildStatus"),"Could not read build log: "+explainError(e),"error");}
+  };
+  $("downloadApk").onclick=()=>{
+    if(!latestRun)return;
+    openPreferringChrome("https://github.com/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/runs/"+latestRun.id);
+  };
+
+  // ---- Decompile APK (jadx via GitHub Actions) ----
+  // Same idea as the build workflow above: the heavy work (running jadx) happens entirely on
+  // GitHub's servers, never on the phone. The workflow zips its own output into ONE file
+  // (decompiled-source.zip) before uploading it as an artifact, so there is exactly one ZIP to
+  // download — never a folder of loose files.
+  function decompileWorkflowYaml(){
+    return `name: Decompile APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_path:
+        description: 'Path to a small .apk already committed to this repository (leave blank if using apk_url instead)'
+        required: false
+        default: ''
+      apk_url:
+        description: 'Direct download link to a large .apk, e.g. a GitHub Release asset link (leave blank if using apk_path instead)'
+        required: false
+        default: ''
+
+jobs:
+  decompile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download jadx
+        run: |
+          set -e
+          JADX_URL=$(curl -s https://api.github.com/repos/skylot/jadx/releases/latest | grep "browser_download_url.*\\.zip" | cut -d '"' -f 4)
+          curl -L -o jadx.zip "$JADX_URL"
+          unzip -q jadx.zip -d jadx-tool
+          chmod +x jadx-tool/bin/jadx
+
+      - name: Prepare the APK file
+        run: |
+          set -e
+          if [ -n "\${{ github.event.inputs.apk_url }}" ]; then
+            echo "Downloading APK from the provided link..."
+            curl -L -o target.apk "\${{ github.event.inputs.apk_url }}"
+          elif [ -n "\${{ github.event.inputs.apk_path }}" ]; then
+            cp "\${{ github.event.inputs.apk_path }}" target.apk
+          else
+            echo "::error::Provide either apk_path (small file already in the repo) or apk_url (large file link)."
+            exit 1
+          fi
+
+      - name: Decompile APK into one ZIP
+        run: |
+          set +e
+          mkdir -p decompiled
+          ./jadx-tool/bin/jadx --deobf -d decompiled target.apk 2>&1 | tee decompile_output.log
+          if [ ! -d decompiled ] || [ -z "$(ls -A decompiled)" ]; then
+            grep -iE "error|exception|not found" decompile_output.log | tail -n 40 > errors_only.log || true
+            if [ -s errors_only.log ]; then
+              while IFS= read -r line; do
+                escaped=$(printf '%s' "$line" | sed 's/%/%25/g; s/\\r/%0D/g')
+                echo "::error::$escaped"
+              done < errors_only.log
+            else
+              echo "::error::jadx produced no output. Check that target.apk is a real, complete .apk file (check your apk_path or apk_url input)."
+            fi
+            exit 1
+          fi
+          cd decompiled && zip -qr ../decompiled-source.zip . && cd ..
+
+      - name: Upload the whole decompiled project as one ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: decompiled-source
+          path: decompiled-source.zip
+`;
+  }
+
+  $("addDecompileWorkflow").onclick=async()=>{
+    if(!needConnection())return;
+    try{
+      const yaml=decompileWorkflowYaml();
+      await commitFiles(
+        [{path:".github/workflows/decompile.yml",bytes:new TextEncoder().encode(yaml)}],
+        "decompile workflow"
+      );
+      msg($("decompileStatus"),"Decompile workflow added. Fill in either the file path or the large-file link below, then tap Start Decompile.","ok");
+    }catch(e){msg($("decompileStatus"),"Adding the decompile workflow failed: "+explainError(e),"error");}
+  };
+
+  let latestDecompileRun=null;
+  let decompilePollTimer=null;
+  let decompilePollAttempts=0;
+  function stopDecompilePoll(){ if(decompilePollTimer){clearTimeout(decompilePollTimer);decompilePollTimer=null;} }
+
+  async function findDecompileWorkflow(){
+    const d=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/workflows?per_page=100");
+    return (d.workflows||[]).find(w=>w.path.endsWith("decompile.yml"));
+  }
+
+  $("startDecompile").onclick=async()=>{
+    if(!needConnection())return;
+    const apkPath=$("decompileApkPath").value.trim();
+    const apkUrl=$("decompileApkUrl").value.trim();
+    if(!apkPath && !apkUrl){alert("Fill in either the repository path (small file) or the link (large file) first.");$("decompileApkPath").focus();return;}
+    try{
+      const wf=await findDecompileWorkflow();
+      if(!wf){
+        msg($("decompileStatus"),"No decompile workflow found yet — tap \"Add Decompile workflow (one-time setup)\" first.","error");
+        return;
+      }
+      await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/workflows/"+wf.id+"/dispatches",{method:"POST",body:JSON.stringify({ref:repoDefaultBranch,inputs:{apk_path:apkPath,apk_url:apkUrl}})});
+      msg($("decompileStatus"),"Decompile started for \""+(apkUrl||apkPath)+"\". GitHub Actions is running jadx — checking automatically, you don't need to tap anything else.","ok");
+      $("downloadDecompiled").disabled=true;
+      startDecompilePoll(wf.id);
+    }catch(e){msg($("decompileStatus"),"Could not start decompile: "+explainError(e),"error");}
+  };
+
+  function startDecompilePoll(workflowId){
+    stopDecompilePoll();
+    decompilePollAttempts=0;
+    let lastAnnounced=null;
+    const tick=async()=>{
+      decompilePollAttempts++;
+      try{
+        await refreshDecompile(workflowId);
+        const run=latestDecompileRun;
+        if(run){
+          const stateKey=run.status+"/"+(run.conclusion||"");
+          if(stateKey!==lastAnnounced){
+            lastAnnounced=stateKey;
+            if(run.status==="completed"){
+              if(run.conclusion==="success"){
+                msg($("decompileStatus"),"Decompile finished successfully. Tap \"Download decompiled code (ZIP)\" to get the whole thing in one file.","ok");
+                $("downloadDecompiled").disabled=false;
+              }else{
+                msg($("decompileStatus"),"Decompile failed. Check the apk_path is exactly correct and that the file is really an APK.","error");
+              }
+              stopDecompilePoll();
+              return;
+            }else{
+              msg($("decompileStatus"),"Decompile is "+(run.status==="queued"?"queued, waiting for a runner":"in progress")+"…");
+            }
+          }
+        }
+      }catch(e){
+        msg($("decompileStatus"),"Automatic status check failed: "+explainError(e)+" — tap \"Refresh decompile status\" to try manually.","error");
+        stopDecompilePoll();
+        return;
+      }
+      if(decompilePollAttempts<AUTO_POLL_MAX_ATTEMPTS){
+        decompilePollTimer=setTimeout(tick,AUTO_POLL_INTERVAL_MS);
+      }else{
+        msg($("decompileStatus"),"Still not finished after a while — tap \"Refresh decompile status\" to keep checking.","");
+      }
+    };
+    decompilePollTimer=setTimeout(tick,AUTO_POLL_INTERVAL_MS);
+  }
+
+  $("refreshDecompileBtn").onclick=async()=>{
+    try{
+      const wf=await findDecompileWorkflow();
+      if(!wf){msg($("decompileStatus"),"No decompile workflow found yet.","error");return;}
+      await refreshDecompile(wf.id);
+    }catch(e){msg($("decompileStatus"),"Status check failed: "+explainError(e),"error");}
+  };
+
+  async function refreshDecompile(workflowId){
+    if(!needConnection())return;
+    const d=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/workflows/"+workflowId+"/runs?per_page=1");
+    const run=(d.workflow_runs||[])[0];
+    if(!run){msg($("decompileStatus"),"No decompile run found yet.");return;}
+    latestDecompileRun=run;
+    msg($("decompileStatus"),"Latest decompile: "+run.status+(run.conclusion?(" / "+run.conclusion):"")+" — run #"+run.run_number,run.conclusion==="success"?"ok":(run.conclusion==="failure"?"error":""));
+    $("downloadDecompiled").disabled=run.conclusion!=="success";
+  }
+
+  // Downloads the artifact ZIP straight to the phone in one tap instead of sending the person to
+  // the GitHub website — same fetch+blob approach already proven to work for the full build log
+  // above (GitHub's artifact storage allows this cross-origin read).
+  async function fetchArtifactBlob(runId,artifactNamePrefix){
+    const MAX_ATTEMPTS=4, RETRY_DELAY_MS=4000;
+    const list=await request("/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/runs/"+runId+"/artifacts");
+    const art=(list.artifacts||[]).find(a=>a.name.startsWith(artifactNamePrefix));
+    if(!art) throw new Error("No \""+artifactNamePrefix+"\" artifact was found for this run.");
+    let lastStatus=null;
+    for(let attempt=1;attempt<=MAX_ATTEMPTS;attempt++){
+      const r=await fetch(api+"/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo())+"/actions/artifacts/"+art.id+"/zip",{headers:headers()});
+      if(r.ok) return await r.blob();
+      lastStatus=r.status;
+      if(r.status===404 && attempt<MAX_ATTEMPTS){
+        msg($("decompileStatus"),"GitHub is still preparing the download — trying again in a few seconds ("+attempt+"/"+(MAX_ATTEMPTS-1)+")…");
+        await new Promise(res=>setTimeout(res,RETRY_DELAY_MS));
+        continue;
+      }
+      break;
+    }
+    throw new Error("Could not download the artifact (HTTP "+lastStatus+").");
+  }
+
+  $("downloadDecompiled").onclick=async()=>{
+    if(!latestDecompileRun)return;
+    try{
+      msg($("decompileStatus"),"Preparing your download…");
+      const blob=await fetchArtifactBlob(latestDecompileRun.id,"decompiled-source");
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url; a.download="decompiled-source.zip";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),10000);
+      msg($("decompileStatus"),"Download started — check your phone's Downloads/notifications for decompiled-source.zip.","ok");
+    }catch(e){msg($("decompileStatus"),"Download failed: "+explainError(e)+" — you can also open the GitHub Actions run page for this repository and download it from there instead.","error");}
+  };
+
+  $("copyDecompileStatus").onclick=()=>copyStatusBox("decompileStatus","decompileStatusFallback");
+
+  // ---- Large file upload (GitHub Release asset, up to 2 GB) ----
+  // GitHub's normal "commit a file" API (used by Upload files above) is capped at 100 MB per
+  // file — that limit is GitHub's, not this tool's. Release assets are a separate storage area
+  // on GitHub that allows up to 2 GB per file, so a big APK goes there instead of into a commit.
+  const RELEASE_TAG="large-files";
+  async function getOrCreateLargeFilesRelease(){
+    const repoPath="/repos/"+encodeURIComponent(owner())+"/"+encodeURIComponent(repo());
+    try{
+      return await request(repoPath+"/releases/tags/"+encodeURIComponent(RELEASE_TAG));
+    }catch(e){
+      if(e.status!==404) throw e;
+    }
+    return await request(repoPath+"/releases",{method:"POST",body:JSON.stringify({
+      tag_name:RELEASE_TAG,
+      target_commitish:repoDefaultBranch,
+      name:"Large files",
+      body:"Large files uploaded from Accessible GitHub APK Builder. Safe to ignore — this is just storage, not a real app release.",
+      draft:false,
+      prerelease:false
+    })});
+  }
+
+  $("uploadLargeFile").onclick=async()=>{
+    if(!needConnection())return;
+    const f=($("largeFileInput").files||[])[0];
+    if(!f){alert("Choose a file first.");return;}
+    if(f.size>2*1024*1024*1024){msg($("largeFileStatus"),"That file is over 2 GB, which even GitHub Releases cannot accept.","error");return;}
+    try{
+      msg($("largeFileStatus"),"Preparing upload location…");
+      const rel=await getOrCreateLargeFilesRelease();
+      // A same-named asset already existing on this release would be rejected — add a short
+      // timestamp suffix so re-uploading the "same" file (e.g. after a re-download on the
+      // phone) never collides with a previous attempt.
+      const stamp=Date.now();
+      const dot=f.name.lastIndexOf(".");
+      const assetName=dot>0?(f.name.slice(0,dot)+"-"+stamp+f.name.slice(dot)):(f.name+"-"+stamp);
+      msg($("largeFileStatus"),"Uploading "+f.name+" ("+(f.size/1024/1024).toFixed(1)+" MB)… this can take a few minutes, please stay on this page.");
+      const uploadBase=(rel.upload_url||"").split("{")[0];
+      const buf=await f.arrayBuffer();
+      const r=await fetch(uploadBase+"?name="+encodeURIComponent(assetName),{
+        method:"POST",
+        headers:{Authorization:"Bearer "+token(),"Content-Type":f.type||"application/octet-stream"},
+        body:buf
+      });
+      const data=await r.json();
+      if(!r.ok) throw new Error(data?.message||("HTTP "+r.status));
+      $("largeFileUrl").value=data.browser_download_url;
+      $("decompileApkUrl").value=data.browser_download_url;
+      $("decompileApkPath").value="";
+      msg($("largeFileStatus"),"Upload complete: "+f.name+" is stored and ready. The link below (and the Decompile section) is filled in automatically.","ok");
+    }catch(e){msg($("largeFileStatus"),"Large file upload failed: "+explainError(e),"error");}
+  };
+  $("copyLargeFileStatus").onclick=()=>copyStatusBox("largeFileStatus","largeFileStatusFallback");
+})();
+</script>
+</body>
+</html>
