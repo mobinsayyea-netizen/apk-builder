@@ -19,9 +19,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Decode keystore
         run: |
           KEYSTORE_B64="${{ secrets.KEYSTORE_B64 }}"
@@ -49,10 +46,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "buildlog-${{ github.run_number }}" build_output.log \
-            --title "Build log for failed run ${{ github.run_number }}" \
-            --notes "Full gradle output from the failed build. Safe to delete once read." \
-            --prerelease
+          if [ -f build_output.log ]; then
+            gh release create "buildlog-${{ github.run_number }}" build_output.log \
+              --title "Build log for failed run ${{ github.run_number }}" \
+              --notes "Full gradle output from the failed build. Safe to delete once read." \
+              --prerelease
+          else
+            echo "No build_output.log to upload (an earlier step failed before the build ran)."
+          fi
 
       - name: Name the APK
         run: cp app/build/outputs/apk/release/app-release.apk APKBuilder.apk
