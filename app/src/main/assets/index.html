@@ -37,20 +37,49 @@
   pre{white-space:pre-wrap;overflow:auto;background:#111827;color:#e5e7eb;padding:12px;border-radius:8px;max-height:360px}
   .sr{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
   @media(max-width:700px){.grid{grid-template-columns:1fr}}
+  #chatLog{height:56vh;min-height:260px;overflow:auto;border:1px solid #d7dbe0;border-radius:12px;padding:8px;background:#fff}
+  .cmsg{padding:10px 12px;border-radius:12px;margin:8px 0;white-space:pre-wrap;word-break:break-word}
+  .cmsg.user{background:#dbeafe;margin-left:10%}
+  .cmsg.bot{background:#f1f5f9;margin-right:4%}
+  .cmsg.err{background:#fff1f2;border:1px solid #b91c1c}
+  .cmsg a{color:#1d4ed8;font-weight:700}
+  #chatInput{min-height:96px;font-family:inherit}
+  #chatStatus:empty{display:none}
+  button.chip{padding:8px 12px;min-height:40px;margin:2px}
+  details#moreOuter>summary{cursor:pointer;font-weight:700;font-size:1.1rem;padding:14px;background:#fff;border:1px solid #d7dbe0;border-radius:12px;margin-bottom:16px;min-height:48px}
 </style>
 </head>
 <body>
 <header>
   <h1>Accessible GitHub APK Builder</h1>
-  <p>Upload ZIPs, manage repositories, edit files, start GitHub Actions builds, and read build errors — without using the GitHub website.</p>
+  <p>बताइए कौन-सा ऐप बनाना है। AI आपसे बात करेगा, आप "बनाओ" कहेंगे तो फ़ाइलें GitHub पर डालकर बिल्ड करेगा और APK का सीधा लिंक देगा। बाकी सारे औज़ार नीचे More options में हैं।</p>
 </header>
 
 <main>
+<section id="chatSection" lang="hi" aria-labelledby="chatTitle">
+<h2 id="chatTitle">बातचीत — ऐप बनवाइए</h2>
+<div id="chatLog" role="log" aria-label="बातचीत" tabindex="0"></div>
+<div id="chatStatus" class="status" role="status" aria-live="polite"></div>
+<div id="chatAttachList" class="row"></div>
+<label for="chatInput">आपका संदेश</label>
+<textarea id="chatInput" placeholder="यहाँ लिखिए…"></textarea>
+<input type="file" id="chatFile" multiple hidden>
+<div class="row">
+<button id="chatSend" type="button">Send (भेजें)</button>
+<button id="chatAttach" class="secondary" type="button">Attach (फ़ाइल जोड़ें)</button>
+<button id="chatStop" class="danger" type="button">Stop (रोकें)</button>
+<button id="chatNew" class="secondary" type="button">नई चैट</button>
+</div>
+</section>
+
+<details id="moreOuter">
+<summary>More options (GitHub token, Gemini key, फ़ाइल अपलोड, बिल्ड, रेपो, डिकम्पाइल)</summary>
+
 <section>
 <h2>1. GitHub connection</h2>
 <div id="connectionStatus" class="status" role="status" aria-live="polite">Not connected.</div>
 <details id="moreOptionsDetails">
-<summary id="moreOptionsSummary" style="cursor:pointer;font-weight:700;padding:6px 0">More options (GitHub token, Gemini key)</summary>
+<summary id="moreOptionsSummary" style="cursor:pointer;font-weight:700;padding:6px 0">GitHub token और Gemini key</summary>
 <div style="padding-top:10px">
 <p class="muted">Enter your GitHub Personal Access Token. It stays in this page only unless you choose to save it in your browser. Never send the token to anyone.</p>
 <label for="token">GitHub token</label>
@@ -59,12 +88,17 @@
 <label><input id="rememberToken" type="checkbox" style="width:auto" checked> Remember token in this file (auto-connect next time)</label>
 <button id="connect">Connect</button>
 
-<h3 style="margin-top:18px">Gemini API key (optional — for auto-fixing build errors)</h3>
+<h3 style="margin-top:18px">Gemini API key (चैट AI और बिल्ड-एरर ऑटो-फ़िक्स के लिए)</h3>
 <p class="muted">If set, a failed build is fixed automatically: the error and the file(s) it points to are sent to Gemini, the fix it returns is pushed back to GitHub, and the build is started again — up to 3 tries per build, fully automatic, no confirmation asked. Get a free key at aistudio.google.com. It stays in this browser only, same as the token above.</p>
 <label for="geminiKey">Gemini API key</label>
 <input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off">
 <label><input type="checkbox" id="rememberGeminiKey" style="width:auto" checked> Remember this key in this file</label>
 <button id="saveGeminiKey">Save Gemini key</button>
+<h3 style="margin-top:18px">Chat AI model</h3>
+<label for="chatModel">Gemini model for the chat</label>
+<input id="chatModel" placeholder="gemini-2.5-flash">
+<button id="saveChatModel" type="button">Save model</button>
+<div id="chatModelStatus" class="status" role="status" aria-live="polite"></div>
 </div>
 </details>
 </section>
@@ -214,8 +248,370 @@
 <button id="downloadDecompiled" class="success" disabled>Download decompiled code (ZIP)</button>
 </section>
 
+</details>
+
 </main>
 
+<!-- Project templates used by the chat builder (plain text, never executed) -->
+<script type="text/plain" id="tplWorkflow">
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare signing key (created once, then reused for every build)
+        run: |
+          KS="$RUNNER_TEMP/release.jks"
+          if gh release download signing --pattern release.jks --output "$KS" --clobber; then
+            echo "Reusing the saved signing key"
+          else
+            keytool -genkeypair -keystore "$KS" -storepass android123 -keypass android123 -alias key0 -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=App, O=App, C=IN"
+            gh release create signing "$KS" --title "Signing key (do not delete)" --notes "Used to sign every build of this app so new versions install over old ones." --prerelease
+          fi
+          echo "KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build APK
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: android123
+          KEY_ALIAS: key0
+          KEY_PASSWORD: android123
+        run: |
+          set +e
+          yes | sdkmanager --licenses > /dev/null 2>&1
+          gradle assembleRelease --stacktrace 2>&1 | tee build_output.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep -iE -A3 "error:|^e: |What went wrong|Could not |FAILURE|cannot find symbol|does not exist|Execution failed" build_output.log | grep -v '^--$' | head -n 70 > errors_only.log
+            if [ -s errors_only.log ]; then
+              msg=$(head -c 6000 errors_only.log | tr -d '\r' | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+              echo "::error title=Gradle build failed::$msg"
+            else
+              echo "::error title=Gradle build failed::Build failed with exit code $status but no obvious error line was found."
+            fi
+            exit 1
+          fi
+
+      - name: Publish release (direct APK download link)
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "__APK_NAME__.apk"
+          gh release create "build-${{ github.run_number }}" "__APK_NAME__.apk" --title "__APP_NAME__ build ${{ github.run_number }}" --notes "Automated build."
+</script>
+<script type="text/plain" id="tplRootBuildGradle">
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.5.0'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+</script>
+<script type="text/plain" id="tplSettingsGradle">
+rootProject.name = "__SLUG__"
+include ':app'
+</script>
+<script type="text/plain" id="tplGradleProps">
+android.useAndroidX=true
+org.gradle.jvmargs=-Xmx2048m
+</script>
+<script type="text/plain" id="tplAppBuildGradle">
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "__PKG__"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "__PKG__"
+        minSdk 24
+        targetSdk 34
+        versionCode System.getenv("GITHUB_RUN_NUMBER") ? System.getenv("GITHUB_RUN_NUMBER").toInteger() : 1
+        versionName "1.0." + versionCode
+    }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("KEYSTORE_PATH")
+            if (ksPath != null) {
+                storeFile file(ksPath)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig System.getenv("KEYSTORE_PATH") ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+</script>
+<script type="text/plain" id="tplManifest">
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+__PERMS__
+
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:usesCleartextTraffic="true"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+</script>
+<script type="text/plain" id="tplStrings">
+<resources>
+    <string name="app_name">__APP_LABEL__</string>
+</resources>
+</script>
+<script type="text/plain" id="tplGitignore">
+.gradle/
+build/
+*.iml
+.idea/
+local.properties
+</script>
+<script type="text/plain" id="tplPlaceholderHtml">
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>__APP_LABEL__</title></head>
+<body><h1>__APP_LABEL__</h1><p>This page is a placeholder. Replace app/src/main/assets/index.html with the real app.</p></body></html>
+</script>
+<script type="text/plain" id="tplMainNative">
+package __PKG__;
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.widget.TextView;
+
+/** Starter screen. Replace this file (and add layouts/classes) to build the real native app. */
+public class MainActivity extends Activity {
+  @Override
+  protected void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    TextView tv = new TextView(this);
+    tv.setText("__APP_LABEL__");
+    tv.setTextSize(24);
+    tv.setPadding(32, 64, 32, 32);
+    setContentView(tv);
+  }
+}
+</script>
+<script type="text/plain" id="tplMainWebView">
+package __PKG__;
+
+import android.Manifest;
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
+import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Shows assets/index.html in a WebView. Also provides: camera/mic/location permission grants,
+ * the system file picker for input type=file, and window.AndroidTTS.speak(text, rate) /
+ * window.AndroidTTS.stop() because Android's WebView has no working speechSynthesis.
+ */
+public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
+
+  private static final int REQ_PERMS = 100;
+  private static final int REQ_FILE = 101;
+  private static final String[] WANTED = new String[] {__RUNTIME_PERMS__};
+
+  private WebView webView;
+  private TextToSpeech tts;
+  private boolean ttsReady = false;
+  private ValueCallback<Uri[]> filePathCallback;
+
+  @Override
+  protected void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    tts = new TextToSpeech(this, this);
+
+    webView = new WebView(this);
+    WebSettings s = webView.getSettings();
+    s.setJavaScriptEnabled(true);
+    s.setDomStorageEnabled(true);
+    s.setAllowFileAccess(true);
+    s.setMediaPlaybackRequiresUserGesture(false);
+    s.setGeolocationEnabled(true);
+    webView.addJavascriptInterface(new TtsBridge(), "AndroidTTS");
+    webView.setWebViewClient(new WebViewClient());
+    webView.setWebChromeClient(
+        new WebChromeClient() {
+          @Override
+          public void onPermissionRequest(final PermissionRequest request) {
+            runOnUiThread(() -> request.grant(request.getResources()));
+          }
+
+          @Override
+          public void onGeolocationPermissionsShowPrompt(
+              String origin, GeolocationPermissions.Callback callback) {
+            callback.invoke(origin, true, false);
+          }
+
+          @Override
+          public boolean onShowFileChooser(
+              WebView view,
+              ValueCallback<Uri[]> callback,
+              WebChromeClient.FileChooserParams params) {
+            if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+            filePathCallback = callback;
+            try {
+              startActivityForResult(params.createIntent(), REQ_FILE);
+            } catch (ActivityNotFoundException e) {
+              filePathCallback = null;
+              callback.onReceiveValue(null);
+              return false;
+            }
+            return true;
+          }
+        });
+    setContentView(webView);
+    webView.loadUrl("file:///android_asset/index.html");
+    askPermissions();
+  }
+
+  private void askPermissions() {
+    List<String> need = new ArrayList<>();
+    for (String p : WANTED) {
+      if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) need.add(p);
+    }
+    if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ_PERMS);
+  }
+
+  @Override
+  public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+    super.onRequestPermissionsResult(code, perms, results);
+    if (code == REQ_PERMS) webView.reload();
+  }
+
+  @Override
+  protected void onActivityResult(int req, int res, Intent data) {
+    if (req == REQ_FILE && filePathCallback != null) {
+      filePathCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data));
+      filePathCallback = null;
+      return;
+    }
+    super.onActivityResult(req, res, data);
+  }
+
+  @Override
+  public void onBackPressed() {
+    if (webView.canGoBack()) webView.goBack();
+    else super.onBackPressed();
+  }
+
+  @Override
+  public void onInit(int status) {
+    if (status == TextToSpeech.SUCCESS) {
+      ttsReady = true;
+      tts.setLanguage(new Locale("hi", "IN"));
+    }
+  }
+
+  @Override
+  protected void onDestroy() {
+    if (tts != null) {
+      tts.stop();
+      tts.shutdown();
+    }
+    super.onDestroy();
+  }
+
+  private class TtsBridge {
+    @JavascriptInterface
+    public void speak(String text, float rate) {
+      if (!ttsReady || text == null || text.trim().isEmpty()) return;
+      runOnUiThread(
+          () -> {
+            boolean hasDevanagari = text.chars().anyMatch(c -> c >= 0x0900 && c <= 0x097F);
+            tts.setLanguage(hasDevanagari ? new Locale("hi", "IN") : new Locale("en", "IN"));
+            tts.setSpeechRate(rate > 0 ? rate : 1f);
+            tts.speak(text, TextToSpeech.QUEUE_ADD, null, "app");
+          });
+    }
+
+    @JavascriptInterface
+    public void stop() {
+      runOnUiThread(
+          () -> {
+            if (ttsReady) tts.stop();
+          });
+    }
+  }
+}
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 (() => {
@@ -1739,6 +2135,627 @@ jobs:
     }catch(e){msg($("largeFileStatus"),"Large file upload failed: "+explainError(e),"error");}
   };
   $("copyLargeFileStatus").onclick=()=>copyStatusBox("largeFileStatus","largeFileStatusFallback");
+
+  // =====================================================================================
+  // AI CHAT BUILDER — main screen. A Gemini-powered assistant that talks with the person,
+  // and (only after they say "बनाओ" / tap the go-ahead button) creates repos, writes files,
+  // builds the APK on GitHub Actions, fixes build errors and returns the direct APK link.
+  // Everything below reuses this page's own GitHub helpers (request, explainError, ...).
+  // =====================================================================================
+  const CHAT_MODEL_DEFAULT="gemini-2.5-flash";
+  const MAX_TURN_STEPS=70, MAX_BUILD_FIX_TRIES=6;
+  const chatLog=$("chatLog"), chatInput=$("chatInput"), chatStatus=$("chatStatus");
+  const attachInput=$("chatFile"), attachList=$("chatAttachList");
+  const attachments=new Map();      // name -> {bytes:Uint8Array,type}
+  const zipEntries=new Map();       // zip name -> [{path,bytes}]
+  let pendingNames=[];              // attachments waiting to go with the next message
+  let chatHistory=[];               // Gemini "contents"
+  let notes=[];                     // durable wishes/decisions noted by the assistant
+  let chatBusy=false, stopFlag=false, approved=false, approvalResolver=null;
+  let ownerLogin="", failedBuildsThisTurn=0;
+
+  try{ notes=JSON.parse(localStorage.getItem("apkchat_notes")||"[]"); if(!Array.isArray(notes)) notes=[]; }catch{ notes=[]; }
+  try{ chatHistory=JSON.parse(localStorage.getItem("apkchat_hist")||"[]"); if(!Array.isArray(chatHistory)) chatHistory=[]; }catch{ chatHistory=[]; }
+
+  function chatModel(){ return (localStorage.getItem("apkchat_model")||"").trim()||CHAT_MODEL_DEFAULT; }
+  function enc(s){ return encodeURIComponent(s); }
+  function rp(name){ return "/repos/"+enc(ownerLogin)+"/"+enc(name); }
+  function setStatus(t){ chatStatus.textContent=t||""; }
+  function openMore(){ const o=$("moreOuter"); if(o) o.open=true; }
+  $("moreOptionsDetails").addEventListener("toggle",()=>{ if($("moreOptionsDetails").open) openMore(); });
+
+  function linkify(parent,text){
+    const re=/(https?:\/\/[^\s)<>"']+)/g; let last=0,m;
+    while((m=re.exec(text))){
+      if(m.index>last) parent.appendChild(document.createTextNode(text.slice(last,m.index)));
+      const a=document.createElement("a"); a.href=m[1]; a.textContent=m[1]; a.rel="noopener";
+      a.onclick=ev=>{ ev.preventDefault(); openPreferringChrome(m[1]); };
+      parent.appendChild(a); last=m.index+m[1].length;
+    }
+    if(last<text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  }
+  function addMsg(kind,text){
+    const d=document.createElement("div"); d.className="cmsg "+kind;
+    const who=document.createElement("span"); who.className="sr";
+    who.textContent=kind==="user"?"आप: ":kind==="err"?"गड़बड़: ":"सहायक: ";
+    const t=document.createElement("span"); linkify(t,text);
+    d.append(who,t); chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight; return d;
+  }
+  function addLinkCard(label,url){
+    const d=document.createElement("div"); d.className="cmsg bot";
+    const b=document.createElement("button"); b.type="button"; b.className="success"; b.textContent=label;
+    b.onclick=()=>openPreferringChrome(url);
+    const c=document.createElement("button"); c.type="button"; c.className="secondary"; c.textContent="लिंक कॉपी करें";
+    c.onclick=async()=>{ const ok=await copyToClipboard(url); setStatus(ok?"लिंक कॉपी हो गया।":"कॉपी नहीं हो पाया — ऊपर लिखे लिंक को दबाकर रखिए।"); };
+    d.append(b,c); chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight;
+  }
+  function renderAttachChips(){
+    attachList.textContent="";
+    pendingNames.forEach(n=>{
+      const b=document.createElement("button"); b.type="button"; b.className="secondary chip";
+      b.textContent=n+" ✕ (हटाएँ)"; b.setAttribute("aria-label","अटैच की हुई फ़ाइल "+n+" हटाएँ");
+      b.onclick=()=>{ pendingNames=pendingNames.filter(x=>x!==n); renderAttachChips(); };
+      attachList.appendChild(b);
+    });
+  }
+
+  // ---------- history helpers ----------
+  function isPlainUserTurn(c){ return c&&c.role==="user"&&(c.parts||[]).some(p=>p.text!==undefined)&&!(c.parts||[]).some(p=>p.functionResponse); }
+  function trimHistory(){
+    if(chatHistory.length>60){
+      let i=chatHistory.length-40;
+      while(i<chatHistory.length&&!isPlainUserTurn(chatHistory[i])) i++;
+      chatHistory=i<chatHistory.length?chatHistory.slice(i):[];
+    }
+  }
+  function saveHistory(){
+    trimHistory();
+    const slim=chatHistory.slice(-40).map(c=>({role:c.role,parts:(c.parts||[]).map(p=>{
+      if(p.inlineData) return {text:"[फ़ोटो]"};
+      if(p.functionResponse){ const s=JSON.stringify(p.functionResponse.response||{}); return {functionResponse:{name:p.functionResponse.name,response:{result:s.slice(0,600)}}}; }
+      if(p.functionCall) return {functionCall:{name:p.functionCall.name,args:shrinkArgs(p.functionCall.args)}};
+      if(p.text!==undefined&&!p.thought) return {text:String(p.text).slice(0,3000)};
+      return null;}).filter(Boolean)})).filter(c=>c.parts.length);
+    // must start on a plain user turn
+    let i=0; while(i<slim.length&&!isPlainUserTurn(slim[i])) i++;
+    try{ localStorage.setItem("apkchat_hist",JSON.stringify(slim.slice(i))); }catch{}
+  }
+  function shrinkArgs(a){
+    try{ return JSON.parse(JSON.stringify(a,(k,v)=>typeof v==="string"&&v.length>400?v.slice(0,400)+"…":v)); }catch{ return {}; }
+  }
+  function compactForSend(){
+    const n=chatHistory.length;
+    return chatHistory.map((c,i)=>{
+      const old=i<n-8, older=i<n-16;
+      return {role:c.role,parts:(c.parts||[]).map(p=>{
+        if(p.inlineData&&old) return {text:"[पुरानी फ़ोटो हटाई गई]"};
+        if(p.functionResponse&&older){ const s=JSON.stringify(p.functionResponse.response||{}); return {functionResponse:{name:p.functionResponse.name,response:{result:s.slice(0,1500)}}}; }
+        if(p.functionCall&&older) return {...p,functionCall:{name:p.functionCall.name,args:shrinkArgs(p.functionCall.args)}};
+        if(p.text!==undefined&&old&&p.text.length>8000) return {...p,text:p.text.slice(0,8000)+"…(कटा हुआ)"};
+        return p; })};
+    });
+  }
+  function renderHistory(){
+    chatLog.textContent="";
+    if(!chatHistory.length){ addMsg("bot","नमस्ते! बताइए, आज कौन-सा ऐप बनाना या सुधारना है? पहले हम आराम से बात करेंगे, और आप \"बनाओ\" कहेंगे तभी मैं कुछ बनाना शुरू करूँगा।"); return; }
+    chatHistory.forEach(c=>{
+      if(isPlainUserTurn(c)) addMsg("user",c.parts.filter(p=>p.text!==undefined).map(p=>p.text).join("\n").slice(0,600));
+      else if(c.role==="model"){ const t=(c.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join(""); if(t.trim()) addMsg("bot",t); }
+    });
+  }
+
+  // ---------- system prompt ----------
+  function sysPrompt(){
+    const noteText=notes.length?("\n\nनोट्स (इस व्यक्ति की पक्की बातें और इच्छाएँ):\n- "+notes.join("\n- ")):"";
+    return `You are the assistant inside "Accessible GitHub APK Builder", used by one person on an Android phone (no computer). The person may be blind and uses TalkBack, so write short, plain, screen-reader-friendly text: no tables, no emojis, no long code in chat.
+
+HOW YOU TALK
+- Speak natural, warm, spoken Hindi (Devanagari) like a kind, knowledgeable friend; use "आप". If the person writes English, answer in English. Keep technical words simple and explain them briefly.
+- First understand the wish: repeat it in your own words, ask at most ONE question at a time, and suggest sensible defaults. Notice their mood (worried, in a hurry, excited) and answer to that.
+- While discussing, DO NOT create or change anything. Only when the person clearly says to build (बनाओ, बना दो, शुरू करो, कर दो ...) — or taps the button from ask_go_ahead — you may change GitHub. If you are ready and they have not said so, call ask_go_ahead with a short Hindi plan.
+- When they tell you a lasting wish, decision, project fact or preference, call save_note with one short line. Never save tokens, API keys or passwords.
+- Be honest: you cannot run the app on a phone or see its screen; say what you built and what to check. If unsure, say so.
+
+WHAT YOU CAN DO (tools)
+- Look: list_repos, list_files, read_file. Change (needs go-ahead): create_repo, write_files, delete_files, add_attachment_to_repo, create_android_project, backup_notes. Build: start_build, wait_for_build, get_release_link. Notes: save_note, restore_notes.
+- Files the person attaches arrive in the message (text/images inline, ZIPs listed). Binary files (APK etc.) cannot be read by you; put them in a repo with add_attachment_to_repo.
+- New app: create_repo, then create_android_project (project_type "webview" = HTML/JS app inside a WebView, best for most apps; "native" = Java Activity code you then write with write_files), then write_files for real content. New repos are PUBLIC unless the person asks private (private repos' download links need a GitHub login).
+- Existing repo: read_file/list_files first, then write_files with COMPLETE new file contents (never partial diffs). Do not replace an existing workflow unless asked.
+- Put ALL changes of one step into ONE write_files call (every push starts a build; extra pushes waste time).
+
+ANDROID RULES THAT KEEP BUILDS GREEN
+- Toolchain: Gradle 8.7, Android Gradle Plugin 8.5.0, compileSdk 34, minSdk 24, Java 17, package under app/src/main/java/<package path>/. Use plain android.* framework classes (Activity, WebView, TextToSpeech ...). Avoid extra libraries unless really needed; only google()/mavenCentral() are available. Prefer Java over Kotlin.
+- Every class you write must have correct imports and the manifest must declare permissions, services and activities you use. Foreground services need the right foregroundServiceType and permissions.
+- WebView apps: the page is app/src/main/assets/index.html. Inside the app, window.AndroidTTS.speak(text, rate) and window.AndroidTTS.stop() exist for speech (check typeof AndroidTTS !== "undefined"); Web Speech synthesis does not work in a WebView. File pickers, camera, mic and location work.
+- Keep the app accessible: labelled buttons, aria-live for changing text, large touch targets.
+
+BUILD LOOP (after go-ahead)
+1. After files are pushed a build starts by itself: call start_build (it reuses that run), then call wait_for_build repeatedly until status is success or failed (it returns "running" after ~40 s; just call again).
+2. On failed: read the errors, read_file the files they point to, fix with ONE write_files call, then start_build and wait again. At most ${MAX_BUILD_FIX_TRIES} fix attempts, then explain honestly what is wrong and what you would try next.
+3. On success: tell them the direct APK link on its own line, and that installing it over the old version updates the app (same signing key). Then ask what to improve.
+- Never claim a build succeeded unless wait_for_build said so.${noteText}`;
+  }
+
+  // ---------- tool declarations (Gemini function calling) ----------
+  const S={type:"STRING"};
+  const TOOL_DECLS=[
+    {name:"list_repos",description:"List the person's GitHub repositories (name, description, last update)."},
+    {name:"list_files",description:"List files in a repository (up to 300 paths).",parameters:{type:"OBJECT",properties:{repo:S,path_prefix:{type:"STRING",description:"optional folder prefix"}},required:["repo"]}},
+    {name:"read_file",description:"Read one text file from a repository (first 15000 characters).",parameters:{type:"OBJECT",properties:{repo:S,path:S},required:["repo","path"]}},
+    {name:"ask_go_ahead",description:"Show the person a plan with two buttons (हाँ, बनाओ / अभी नहीं) and wait. Use when ready to change things but they have not said 'बनाओ' yet.",parameters:{type:"OBJECT",properties:{plan:{type:"STRING",description:"short plan in Hindi"}},required:["plan"]}},
+    {name:"save_note",description:"Save one short line about the person's lasting wishes, decisions or project facts. Never secrets.",parameters:{type:"OBJECT",properties:{text:S},required:["text"]}},
+    {name:"restore_notes",description:"Load saved notes back from the person's GitHub repo 'builder-notes' (after a backup)."},
+    {name:"backup_notes",description:"Save the notes into the person's repo 'builder-notes' (file notes.md), creating it if needed. Needs go-ahead."},
+    {name:"create_repo",description:"Create a new GitHub repository (with an initial commit). Needs go-ahead.",parameters:{type:"OBJECT",properties:{name:S,description:S,private_repo:{type:"BOOLEAN",description:"default false (public)"}},required:["name"]}},
+    {name:"create_android_project",description:"Create the complete Android project skeleton in a repo: Gradle files, manifest, MainActivity, build workflow (signed release APK + direct-link release). Needs go-ahead.",parameters:{type:"OBJECT",properties:{repo:S,app_name:{type:"STRING",description:"name shown under the app icon"},package_id:{type:"STRING",description:"e.g. com.mobeen.myapp (lowercase)"},project_type:{type:"STRING",description:"webview or native"},permissions:{type:"ARRAY",items:S,description:"any of CAMERA, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, WAKE_LOCK, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION, POST_NOTIFICATIONS, VIBRATE, FOREGROUND_SERVICE, READ_MEDIA_IMAGES, READ_MEDIA_AUDIO, READ_MEDIA_VIDEO (INTERNET is always added)"},html:{type:"STRING",description:"for webview: full contents of index.html (optional here, can be written later)"},overwrite:{type:"BOOLEAN"}},required:["repo","app_name","package_id","project_type"]}},
+    {name:"write_files",description:"Create or overwrite text files in a repo in ONE commit. Provide complete contents. Needs go-ahead.",parameters:{type:"OBJECT",properties:{repo:S,message:{type:"STRING",description:"commit message"},files:{type:"ARRAY",items:{type:"OBJECT",properties:{path:S,content:S},required:["path","content"]}}},required:["repo","files"]}},
+    {name:"delete_files",description:"Delete files from a repo in one commit. Needs go-ahead.",parameters:{type:"OBJECT",properties:{repo:S,paths:{type:"ARRAY",items:S},message:S},required:["repo","paths"]}},
+    {name:"add_attachment_to_repo",description:"Put a file the person attached into a repo (works for binary files too). For a ZIP, set extract_zip true to unpack it. Needs go-ahead.",parameters:{type:"OBJECT",properties:{repo:S,attachment_name:S,repo_path:{type:"STRING",description:"destination file path, or folder for a ZIP (empty = repo root / same file name)"},extract_zip:{type:"BOOLEAN"},strip_top_folder:{type:"BOOLEAN",description:"for ZIPs with one top folder; default true"}},required:["repo","attachment_name"]}},
+    {name:"start_build",description:"Make sure a GitHub Actions build is running for the latest commit (reuses the automatic run from the push, or starts one). Returns run_id.",parameters:{type:"OBJECT",properties:{repo:S},required:["repo"]}},
+    {name:"wait_for_build",description:"Wait (up to ~40 s per call) for a build. Returns status running (call again), success (with apk_url) or failed (with error text).",parameters:{type:"OBJECT",properties:{repo:S,run_id:{type:"NUMBER"}},required:["repo","run_id"]}},
+    {name:"get_release_link",description:"Get the newest direct APK download link of a repo.",parameters:{type:"OBJECT",properties:{repo:S},required:["repo"]}}
+  ];
+  const MODIFYING=new Set(["create_repo","create_android_project","write_files","delete_files","add_attachment_to_repo","backup_notes"]);
+  const TOOL_LABEL={list_repos:"रेपो की सूची देख रहा हूँ…",list_files:"फ़ाइलें देख रहा हूँ…",read_file:"फ़ाइल पढ़ रहा हूँ…",ask_go_ahead:"आपकी हाँ का इंतज़ार…",save_note:"नोट लिख रहा हूँ…",restore_notes:"नोट्स वापस ला रहा हूँ…",backup_notes:"नोट्स का बैकअप ले रहा हूँ…",create_repo:"नया रेपो बना रहा हूँ…",create_android_project:"ऐप का ढाँचा बना रहा हूँ…",write_files:"फ़ाइलें GitHub पर भेज रहा हूँ…",delete_files:"फ़ाइलें हटा रहा हूँ…",add_attachment_to_repo:"आपकी फ़ाइल रेपो में डाल रहा हूँ…",start_build:"बिल्ड शुरू कर रहा हूँ…",wait_for_build:"बिल्ड चल रहा है…",get_release_link:"APK का लिंक ढूँढ रहा हूँ…"};
+
+  // ---------- GitHub helpers for the tools ----------
+  function cleanPath(p){
+    p=String(p||"").replace(/\\/g,"/").replace(/^\.?\/+/,"").trim();
+    if(!p||p.split("/").some(s=>s===".."||s==="")) throw new Error("अमान्य फ़ाइल पथ: "+p);
+    return p;
+  }
+  function utf8(s){ return new TextEncoder().encode(String(s)); }
+  async function ensureOwner(){
+    if(!ownerLogin){ const u=await request("/user"); ownerLogin=u.login; }
+    return ownerLogin;
+  }
+  async function agentCommit(name,entries,message){
+    if(!entries.length) throw new Error("कोई फ़ाइल नहीं दी गई");
+    if(entries.length>500) throw new Error("एक बार में 500 से ज़्यादा फ़ाइलें नहीं भेज सकते — कई हिस्सों में भेजिए।");
+    const base=rp(name);
+    const info=await request(base);
+    const branch=info.default_branch||"main";
+    let parentSha=null, baseTree=null, remaining=entries;
+    try{
+      const ref=await request(base+"/git/ref/heads/"+enc(branch));
+      const c=await request(base+"/git/commits/"+ref.object.sha);
+      parentSha=c.sha; baseTree=c.tree.sha;
+    }catch(e){
+      if(!(e.status===404||e.status===409)) throw e;
+      const first=entries.find(x=>!x.remove);
+      if(!first) throw new Error("खाली रेपो में हटाने को कुछ नहीं है।");
+      const r=await request(base+"/contents/"+first.path.split("/").map(enc).join("/"),{method:"PUT",body:JSON.stringify({message,content:bytesToBase64(first.bytes),branch})});
+      parentSha=r.commit.sha; baseTree=r.commit.tree.sha;
+      remaining=entries.filter(x=>x!==first);
+      if(!remaining.length) return {commit_sha:parentSha,files:1};
+    }
+    const tree=[];
+    for(let i=0;i<remaining.length;i++){
+      const e=remaining[i];
+      if(e.remove){ tree.push({path:e.path,mode:"100644",type:"blob",sha:null}); continue; }
+      setStatus("फ़ाइल भेज रहा हूँ "+(i+1)+"/"+remaining.length+": "+e.path);
+      const b=await requestWithRetry(base+"/git/blobs",{method:"POST",body:JSON.stringify({content:bytesToBase64(e.bytes),encoding:"base64"})});
+      tree.push({path:e.path,mode:"100644",type:"blob",sha:b.sha});
+      if(remaining.length>8) await sleep(150);
+    }
+    const t=await request(base+"/git/trees",{method:"POST",body:JSON.stringify({base_tree:baseTree,tree})});
+    const c=await request(base+"/git/commits",{method:"POST",body:JSON.stringify({message:message||"Update via chat builder",tree:t.sha,parents:[parentSha]})});
+    await request(base+"/git/refs/heads/"+enc(branch),{method:"PATCH",body:JSON.stringify({sha:c.sha,force:false})});
+    return {commit_sha:c.sha,files:entries.length,branch};
+  }
+  async function repoTreePaths(name){
+    const info=await request(rp(name));
+    const t=await request(rp(name)+"/git/trees/"+enc(info.default_branch)+"?recursive=1");
+    return {branch:info.default_branch,items:(t.tree||[]).filter(x=>x.type==="blob")};
+  }
+  function limitJson(obj,max=12000){
+    let s=JSON.stringify(obj);
+    if(s.length<=max) return obj;
+    return {truncated:true,result:s.slice(0,max)};
+  }
+
+  // ---------- project scaffold ----------
+  const PERM_OK=["CAMERA","RECORD_AUDIO","MODIFY_AUDIO_SETTINGS","WAKE_LOCK","ACCESS_FINE_LOCATION","ACCESS_COARSE_LOCATION","POST_NOTIFICATIONS","VIBRATE","FOREGROUND_SERVICE","READ_MEDIA_IMAGES","READ_MEDIA_AUDIO","READ_MEDIA_VIDEO"];
+  const PERM_RUNTIME=["CAMERA","RECORD_AUDIO","ACCESS_FINE_LOCATION","ACCESS_COARSE_LOCATION","POST_NOTIFICATIONS","READ_MEDIA_IMAGES","READ_MEDIA_AUDIO","READ_MEDIA_VIDEO"];
+  function tpl(id){ return $(id).textContent.replace(/^\n/,""); }
+  function fill(s,map){ return s.replace(/__([A-Z_]+)__/g,(m,k)=>k in map?map[k]:m); }
+  function xmlEsc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;"); }
+  function generateProject({appName,pkg,type,permissions,html}){
+    const perms=["INTERNET",...(permissions||[]).map(p=>String(p).toUpperCase().replace(/^ANDROID\.PERMISSION\./,"")).filter(p=>PERM_OK.includes(p))];
+    const uniq=[...new Set(perms)];
+    const permXml=uniq.map(p=>'    <uses-permission android:name="android.permission.'+p+'" />').join("\n")
+      +(uniq.includes("CAMERA")?'\n    <uses-feature android:name="android.hardware.camera" android:required="false" />':"");
+    const runtime=uniq.filter(p=>PERM_RUNTIME.includes(p)).map(p=>"Manifest.permission."+p).join(", ");
+    const apkName=(appName.replace(/[^A-Za-z0-9]+/g,"")||"App");
+    const slug=(appName.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"app");
+    const map={PKG:pkg,APP_LABEL:xmlEsc(appName),APP_NAME:appName.replace(/["$`\\]/g,""),APK_NAME:apkName,SLUG:slug,PERMS:permXml,RUNTIME_PERMS:runtime};
+    const javaDir="app/src/main/java/"+pkg.split(".").join("/")+"/";
+    const files=[
+      {path:".github/workflows/build.yml",text:fill(tpl("tplWorkflow"),map)},
+      {path:"build.gradle",text:tpl("tplRootBuildGradle")},
+      {path:"settings.gradle",text:fill(tpl("tplSettingsGradle"),map)},
+      {path:"gradle.properties",text:tpl("tplGradleProps")},
+      {path:".gitignore",text:tpl("tplGitignore")},
+      {path:"app/build.gradle",text:fill(tpl("tplAppBuildGradle"),map)},
+      {path:"app/src/main/AndroidManifest.xml",text:fill(tpl("tplManifest"),map)},
+      {path:"app/src/main/res/values/strings.xml",text:fill(tpl("tplStrings"),map)},
+      {path:javaDir+"MainActivity.java",text:fill(tpl(type==="webview"?"tplMainWebView":"tplMainNative"),map)}
+    ];
+    if(type==="webview") files.push({path:"app/src/main/assets/index.html",text:html&&html.trim()?html:fill(tpl("tplPlaceholderHtml"),map)});
+    return files.map(f=>({path:f.path,bytes:utf8(f.text)}));
+  }
+
+  // ---------- build helpers ----------
+  async function findRunForSha(name,sha){
+    const d=await request(rp(name)+"/actions/runs?head_sha="+enc(sha)+"&per_page=10");
+    const runs=(d.workflow_runs||[]);
+    return runs.find(r=>r.conclusion!=="cancelled")||runs[0]||null;
+  }
+  async function headSha(name){
+    const info=await request(rp(name));
+    const ref=await request(rp(name)+"/git/ref/heads/"+enc(info.default_branch));
+    return {sha:ref.object.sha,branch:info.default_branch};
+  }
+  async function apkFromRelease(name,run){
+    try{
+      const rel=await request(rp(name)+"/releases/tags/build-"+run.run_number);
+      const a=(rel.assets||[]).find(x=>/\.apk$/i.test(x.name));
+      if(a) return {apk_url:a.browser_download_url,release_page:rel.html_url};
+    }catch(e){}
+    try{
+      const list=await request(rp(name)+"/releases?per_page=8");
+      for(const rel of list){ const a=(rel.assets||[]).find(x=>/\.apk$/i.test(x.name)); if(a) return {apk_url:a.browser_download_url,release_page:rel.html_url,note:"नवीनतम APK वाला रिलीज़"}; }
+    }catch(e){}
+    return null;
+  }
+  async function failureDetails(name,run){
+    let failedStep="", texts=[];
+    try{
+      const jobs=await request(rp(name)+"/actions/runs/"+run.id+"/jobs?per_page=20");
+      for(const j of (jobs.jobs||[])){
+        const bad=(j.steps||[]).find(s=>s.conclusion==="failure");
+        if(bad&&!failedStep) failedStep=bad.name;
+        try{
+          const anns=await request(rp(name)+"/check-runs/"+j.id+"/annotations?per_page=50");
+          (anns||[]).filter(a=>a.annotation_level==="failure"&&!/Node\.js \d+ is deprecated/i.test(a.message)).forEach(a=>{
+            if(/Process completed with exit code/i.test(a.message)&&!a.title) return;
+            texts.push((a.title?a.title+": ":"")+a.message);
+          });
+        }catch(e){}
+      }
+    }catch(e){}
+    let errors=texts.join("\n---\n");
+    if(!errors){
+      try{ const r=await fetchFullBuildLogText(run.id); errors=r.items.slice(-80).join("\n"); }catch(e){ errors="(लॉग पढ़ा नहीं जा सका: "+explainError(e)+")"; }
+    }
+    errors=errors.split("\n").filter(l=>!/^\s+at\s|^Caused by:|^\* Try:|Node\.js \d+ is deprecated/.test(l)).join("\n");
+    return {failed_step:failedStep,errors:errors.slice(0,6000)};
+  }
+  const runStarted=new Map();
+
+  // ---------- tools ----------
+  const TOOLS={
+    async list_repos(){
+      const d=await request("/user/repos?per_page=100&sort=updated");
+      return {repos:d.map(r=>({name:r.name,description:(r.description||"").slice(0,80),private:r.private,updated:r.pushed_at}))};
+    },
+    async list_files({repo,path_prefix}){
+      const {branch,items}=await repoTreePaths(repo);
+      let list=items.map(x=>x.path+" ("+x.size+" B)");
+      if(path_prefix) list=list.filter(p=>p.startsWith(path_prefix));
+      return {branch,total:list.length,files:list.slice(0,300)};
+    },
+    async read_file({repo,path}){
+      path=cleanPath(path);
+      const info=await request(rp(repo));
+      const d=await request(rp(repo)+"/contents/"+path.split("/").map(enc).join("/")+"?ref="+enc(info.default_branch));
+      if(Array.isArray(d)) return {error:"यह फ़ोल्डर है, फ़ाइल नहीं।",entries:d.map(x=>x.name)};
+      let text;
+      if(d.content&&d.encoding==="base64") text=decodeBase64Utf8(d.content);
+      else{ const b=await request(rp(repo)+"/git/blobs/"+d.sha); text=decodeBase64Utf8(b.content); }
+      return {path,size:d.size,truncated:text.length>15000,content:text.slice(0,15000)};
+    },
+    async ask_go_ahead({plan}){
+      if(approved) return {approved:true,note:"पहले से अनुमति है"};
+      const d=document.createElement("div"); d.className="cmsg bot";
+      const p=document.createElement("div"); p.textContent="योजना: "+plan; d.appendChild(p);
+      const yes=document.createElement("button"); yes.type="button"; yes.className="success"; yes.textContent="हाँ, बनाओ";
+      const no=document.createElement("button"); no.type="button"; no.className="secondary"; no.textContent="अभी नहीं";
+      d.append(yes,no); chatLog.appendChild(d); chatLog.scrollTop=chatLog.scrollHeight; yes.focus();
+      const ans=await new Promise(res=>{
+        approvalResolver=res;
+        yes.onclick=()=>res(true); no.onclick=()=>res(false);
+      });
+      approvalResolver=null; yes.disabled=no.disabled=true;
+      addMsg("user",ans?"हाँ, बनाओ":"अभी नहीं");
+      approved=ans;
+      return ans?{approved:true}:{approved:false,note:"अभी न बनाएँ। पूछिए कि क्या बदलना है।"};
+    },
+    async save_note({text}){
+      text=String(text||"").trim().slice(0,300);
+      if(!text) return {error:"खाली नोट"};
+      if(/ghp_|github_pat_|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}/.test(text)) return {error:"टोकन/की नोट में नहीं रखते।"};
+      if(!notes.includes(text)) notes.push(text);
+      if(notes.length>60) notes=notes.slice(-60);
+      localStorage.setItem("apkchat_notes",JSON.stringify(notes));
+      return {saved:true,count:notes.length};
+    },
+    async restore_notes(){
+      try{
+        const d=await request(rp("builder-notes")+"/contents/notes.md");
+        const lines=decodeBase64Utf8(d.content).split("\n").map(l=>l.replace(/^-\s*/,"").trim()).filter(Boolean);
+        notes=[...new Set([...notes,...lines])].slice(-60);
+        localStorage.setItem("apkchat_notes",JSON.stringify(notes));
+        return {restored:lines.length};
+      }catch(e){ return {error:"बैकअप नहीं मिला: "+explainError(e)}; }
+    },
+    async backup_notes(){
+      try{ await request(rp("builder-notes")); }
+      catch(e){ if(e.status!==404) throw e; await request("/user/repos",{method:"POST",body:JSON.stringify({name:"builder-notes",description:"Notes saved by the APK builder chat",private:true,auto_init:true})}); await sleep(1500); }
+      const r=await agentCommit("builder-notes",[{path:"notes.md",bytes:utf8(notes.map(n=>"- "+n).join("\n")+"\n")}],"Backup notes");
+      return {backed_up:notes.length,commit:r.commit_sha};
+    },
+    async create_repo({name,description,private_repo}){
+      const clean=String(name||"").trim().replace(/[^A-Za-z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80);
+      if(!clean) return {error:"रेपो का नाम अमान्य है"};
+      try{ const ex=await request(rp(clean)); return {exists:true,full_name:ex.full_name,default_branch:ex.default_branch,note:"यह रेपो पहले से है, नया नहीं बना।"}; }
+      catch(e){ if(e.status!==404) throw e; }
+      const r=await request("/user/repos",{method:"POST",body:JSON.stringify({name:clean,description:description||"",private:private_repo===true,auto_init:true})});
+      await sleep(2000);
+      return {created:true,full_name:r.full_name,name:r.name,default_branch:r.default_branch,private:r.private};
+    },
+    async create_android_project({repo,app_name,package_id,project_type,permissions,html,overwrite}){
+      app_name=String(app_name||"").trim(); package_id=String(package_id||"").trim().toLowerCase();
+      if(!app_name) return {error:"app_name चाहिए"};
+      if(!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/.test(package_id)) return {error:"package_id ऐसा होना चाहिए: com.naam.app (छोटे अक्षर, कम से कम दो हिस्से)"};
+      if(!/^(webview|native)$/.test(project_type)) return {error:"project_type webview या native होना चाहिए"};
+      const {items}=await repoTreePaths(repo).catch(()=>({items:[]}));
+      if(items.some(x=>x.path==="app/build.gradle")&&!overwrite) return {error:"इस रेपो में पहले से Android प्रोजेक्ट है। write_files से बदलाव कीजिए, या overwrite:true दीजिए।"};
+      const files=generateProject({appName:app_name,pkg:package_id,type:project_type,permissions,html});
+      const r=await agentCommit(repo,files,"Android project skeleton ("+project_type+")");
+      return {created:true,files:files.map(f=>f.path),commit:r.commit_sha,note:"पुश से बिल्ड अपने-आप शुरू होगा।"};
+    },
+    async write_files({repo,files,message}){
+      if(!Array.isArray(files)||!files.length) return {error:"files खाली है"};
+      const entries=files.map(f=>({path:cleanPath(f.path),bytes:utf8(f.content==null?"":f.content)}));
+      const r=await agentCommit(repo,entries,message||"Update via chat builder");
+      return {written:entries.map(e=>e.path),commit:r.commit_sha};
+    },
+    async delete_files({repo,paths,message}){
+      if(!Array.isArray(paths)||!paths.length) return {error:"paths खाली है"};
+      const r=await agentCommit(repo,paths.map(p=>({path:cleanPath(p),remove:true})),message||"Delete files via chat builder");
+      return {deleted:paths,commit:r.commit_sha};
+    },
+    async add_attachment_to_repo({repo,attachment_name,repo_path,extract_zip,strip_top_folder}){
+      const att=attachments.get(attachment_name);
+      if(!att) return {error:"यह अटैचमेंट अब उपलब्ध नहीं (पेज दोबारा खुलने पर हट जाते हैं)। कृपया फ़ाइल फिर से अटैच कीजिए।"};
+      let entries=[];
+      const dest=String(repo_path||"").replace(/^\/+|\/+$/g,"");
+      if(extract_zip&&zipEntries.has(attachment_name)){
+        let list=zipEntries.get(attachment_name);
+        const tops=new Set(list.map(f=>f.path.split("/")[0]));
+        const single=tops.size===1&&list.every(f=>f.path.includes("/"));
+        const strip=strip_top_folder!==false&&single;
+        entries=list.map(f=>({path:(dest?dest+"/":"")+(strip?f.path.split("/").slice(1).join("/"):f.path),bytes:f.bytes}));
+      }else{
+        const p=dest&&!/\/$/.test(String(repo_path))?dest:((dest?dest+"/":"")+attachment_name);
+        entries=[{path:cleanPath(p),bytes:att.bytes}];
+      }
+      entries.forEach(e=>{ e.path=cleanPath(e.path); });
+      const r=await agentCommit(repo,entries,"Add "+attachment_name+" via chat builder");
+      return {added:entries.length,first_paths:entries.slice(0,10).map(e=>e.path),commit:r.commit_sha};
+    },
+    async start_build({repo}){
+      const {sha,branch}=await headSha(repo);
+      let run=null;
+      for(let i=0;i<5&&!run;i++){ run=await findRunForSha(repo,sha); if(!run) await sleep(3000); }
+      if(!run){
+        const wfs=((await request(rp(repo)+"/actions/workflows?per_page=100")).workflows||[]).filter(w=>w.state==="active");
+        if(!wfs.length) return {error:"इस रेपो में कोई workflow नहीं है। create_android_project या write_files से .github/workflows/build.yml जोड़िए।"};
+        const wf=wfs.find(w=>/build/i.test(w.name))||wfs[0];
+        await request(rp(repo)+"/actions/workflows/"+wf.id+"/dispatches",{method:"POST",body:JSON.stringify({ref:branch})});
+        for(let i=0;i<10&&!run;i++){ await sleep(3000); run=await findRunForSha(repo,sha); }
+      }
+      if(!run) return {error:"बिल्ड शुरू नहीं दिखा। थोड़ी देर बाद फिर start_build कीजिए।"};
+      runStarted.set(run.id,Date.now());
+      return {run_id:run.id,run_number:run.run_number,status:run.status,head_sha:sha};
+    },
+    async wait_for_build({repo,run_id}){
+      const t0=Date.now(); let id=run_id;
+      if(!runStarted.has(id)) runStarted.set(id,Date.now());
+      while(Date.now()-t0<40000&&!stopFlag){
+        let run=await request(rp(repo)+"/actions/runs/"+id);
+        if(run.status==="completed"&&run.conclusion==="cancelled"){
+          const {sha}=await headSha(repo); const nr=await findRunForSha(repo,sha);
+          if(nr&&nr.id!==id){ id=nr.id; runStarted.set(id,runStarted.get(run_id)); continue; }
+        }
+        if(run.status==="completed"){
+          if(run.conclusion==="success"){
+            let rel=await apkFromRelease(repo,run);
+            if(!rel){ await sleep(4000); rel=await apkFromRelease(repo,run); }
+            if(rel){ lastApkUrl=rel.apk_url; return {status:"success",run_id:id,...rel}; }
+            return {status:"success",run_id:id,apk_url:null,note:"बिल्ड सफल रहा पर रिलीज़ में APK नहीं मिला (workflow में release step हो सकता है न हो)।",run_page:run.html_url};
+          }
+          failedBuildsThisTurn++;
+          const det=await failureDetails(repo,run);
+          return {status:"failed",conclusion:run.conclusion,run_id:id,failed_build_count_this_turn:failedBuildsThisTurn,...det,run_page:run.html_url,
+                  note:failedBuildsThisTurn>=MAX_BUILD_FIX_TRIES?"अधिकतम सुधार-कोशिशें हो चुकीं; ईमानदारी से स्थिति बताइए।":"त्रुटि पढ़कर ठीक कीजिए।"};
+        }
+        setStatus("बिल्ड चल रहा है… "+Math.round((Date.now()-runStarted.get(run_id||id))/1000)+" सेकंड हुए");
+        await sleep(6000);
+      }
+      return {status:"running",run_id:id,note:"अभी चल रहा है — wait_for_build फिर से बुलाइए।"};
+    },
+    async get_release_link({repo}){
+      const list=await request(rp(repo)+"/releases?per_page=10");
+      for(const rel of list){ const a=(rel.assets||[]).find(x=>/\.apk$/i.test(x.name)); if(a){ lastApkUrl=a.browser_download_url; return {apk_url:a.browser_download_url,release:rel.name,published:rel.published_at}; } }
+      return {error:"किसी रिलीज़ में APK नहीं मिला।"};
+    }
+  };
+  let lastApkUrl="";
+
+  async function execTool(name,args){
+    const fn=TOOLS[name];
+    if(!fn) return {error:"अज्ञात टूल: "+name};
+    if(MODIFYING.has(name)&&!approved) return {error:"अभी अनुमति नहीं मिली। पहले ask_go_ahead बुलाइए, या व्यक्ति के 'बनाओ' कहने का इंतज़ार कीजिए।"};
+    setStatus(TOOL_LABEL[name]||"काम कर रहा हूँ…");
+    try{ return limitJson(await fn(args||{})); }
+    catch(e){ return {error:explainError(e)}; }
+  }
+
+  // ---------- Gemini call + main loop ----------
+  async function geminiChat(){
+    const key=geminiKey();
+    const body={systemInstruction:{parts:[{text:sysPrompt()}]},contents:compactForSend(),tools:[{functionDeclarations:TOOL_DECLS}],generationConfig:{temperature:0.5,maxOutputTokens:32000}};
+    let lastErr;
+    for(let attempt=1;attempt<=4;attempt++){
+      if(stopFlag) throw new Error("रोक दिया गया");
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+enc(chatModel())+":generateContent?key="+enc(key),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      const data=await r.json().catch(()=>null);
+      if(r.ok) return data;
+      const m=(data&&data.error&&data.error.message)||("Gemini HTTP "+r.status);
+      lastErr=new Error(m); lastErr.status=r.status;
+      if(r.status===429||r.status===503||r.status===500){
+        setStatus("Gemini व्यस्त है, थोड़ी देर रुककर फिर कोशिश… ("+attempt+"/4)");
+        await sleep(Math.min(8000*attempt,25000)); continue;
+      }
+      break;
+    }
+    throw lastErr;
+  }
+  function friendlyGeminiError(e){
+    const m=String(e&&e.message||e);
+    if(e&&e.status===429||/quota|rate/i.test(m)) return "Gemini की सीमा (quota) अभी भर गई है। कुछ देर बाद \"जारी रखो\" लिखिए। (फ्री key की रोज़ की सीमा होती है।)";
+    if(/API key not valid|API_KEY_INVALID|permission/i.test(m)) return "Gemini key सही नहीं लग रही। More options में key जाँचकर Save कीजिए।";
+    if(e&&e.status===404) return "यह Gemini मॉडल नहीं मिला ("+chatModel()+")। More options में 'Chat AI model' बदलकर देखिए, जैसे gemini-2.5-flash।";
+    return "Gemini से जवाब नहीं आया: "+m;
+  }
+
+  async function runAgent(){
+    let malformed=0;
+    for(let step=0;step<MAX_TURN_STEPS&&!stopFlag;step++){
+      setStatus("सोच रहा हूँ…");
+      const resp=await geminiChat();
+      const cand=resp.candidates&&resp.candidates[0];
+      const content=cand&&cand.content;
+      if(!content||!content.parts||!content.parts.length){
+        if(cand&&/MALFORMED|OTHER/.test(cand.finishReason||"")&&malformed++<2){
+          chatHistory.push({role:"user",parts:[{text:"(सिस्टम: पिछला टूल कॉल गलत बना था। छोटे हिस्सों में दोबारा कोशिश कीजिए।)"}]});
+          continue;
+        }
+        addMsg("err","AI ने खाली जवाब दिया"+(cand&&cand.finishReason?" ("+cand.finishReason+")":"")+"। फिर से कहकर देखिए।");
+        return;
+      }
+      chatHistory.push(content);
+      const text=content.parts.filter(p=>p.text&&!p.thought).map(p=>p.text).join("");
+      if(text.trim()) addMsg("bot",text);
+      const calls=content.parts.filter(p=>p.functionCall);
+      if(!calls.length) return;
+      const results=[];
+      for(const p of calls){
+        const r=await execTool(p.functionCall.name,p.functionCall.args);
+        results.push({functionResponse:{name:p.functionCall.name,response:(r&&typeof r==="object"&&!Array.isArray(r))?r:{result:r}}});
+        if(stopFlag) break;
+      }
+      chatHistory.push({role:"user",parts:results});
+      if(lastApkUrl&&calls.some(c=>c.functionCall.name==="wait_for_build")&&results.some(x=>x.functionResponse.response.status==="success")){
+        addLinkCard("APK डाउनलोड करें",lastApkUrl);
+      }
+    }
+    if(!stopFlag) addMsg("err","बहुत सारे कदम हो गए, इसलिए मैं यहाँ रुक गया। \"जारी रखो\" लिखिए।");
+  }
+
+  // ---------- attachments ----------
+  const TEXT_EXT=new Set("html htm css js mjs json txt md java kt kts xml gradle properties yml yaml py csv svg lua sh ts jsx tsx c cpp h cs go rs php rb sql ini cfg toml bat pro smali gitignore".split(" "));
+  const IMG_MIME={png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",webp:"image/webp",gif:"image/gif"};
+  function looksText(name,type){ const e=(name.split(".").pop()||"").toLowerCase(); return TEXT_EXT.has(e)||/^text\//.test(type||""); }
+  async function readAttachment(f){
+    const bytes=new Uint8Array(await f.arrayBuffer());
+    const name=f.name, ext=(name.split(".").pop()||"").toLowerCase();
+    attachments.set(name,{bytes,type:f.type||""});
+    const parts=[];
+    if(ext==="zip"){
+      try{
+        const {files,skippedJunk,skippedTooBig}=await extractZipBuffer(bytes);
+        zipEntries.set(name,files);
+        let out="[अटैच की गई ZIP: "+name+" — "+files.length+" फ़ाइलें"+(skippedJunk?", "+skippedJunk+" फ़ालतू छोड़ीं":"")+(skippedTooBig.length?", "+skippedTooBig.length+" बहुत बड़ी छोड़ीं":"")+"]\nपथ:\n"+files.slice(0,200).map(x=>x.path).join("\n")+(files.length>200?"\n…और "+(files.length-200):"");
+        let budget=100000;
+        for(const x of files){
+          if(budget<=0) break;
+          if(!looksText(x.path,"")||x.bytes.length>30000||/(^|\/)(gradlew|.*\.lock)$/.test(x.path)) continue;
+          const t=new TextDecoder().decode(x.bytes); budget-=t.length;
+          out+="\n\n===== "+x.path+" =====\n"+t;
+        }
+        parts.push({text:out});
+      }catch(e){ parts.push({text:"[ZIP "+name+" खोली नहीं जा सकी: "+explainError(e)+"]"}); }
+    }else if(IMG_MIME[ext]&&bytes.length<=4*1024*1024){
+      parts.push({text:"[अटैच की गई फ़ोटो: "+name+"]"});
+      parts.push({inlineData:{mimeType:IMG_MIME[ext],data:bytesToBase64(bytes)}});
+    }else if(looksText(name,f.type)){
+      const t=new TextDecoder().decode(bytes);
+      parts.push({text:"[अटैच की गई फ़ाइल: "+name+" ("+bytes.length+" B)]\n"+t.slice(0,60000)+(t.length>60000?"\n…(आगे का हिस्सा कटा हुआ)":"")});
+    }else{
+      parts.push({text:"[अटैच की गई बाइनरी फ़ाइल: "+name+" ("+bytes.length+" B) — इसे पढ़ा नहीं जा सकता, पर add_attachment_to_repo से रेपो में डाली जा सकती है]"});
+    }
+    return parts;
+  }
+  attachInput.onchange=()=>{
+    const files=Array.from(attachInput.files||[]);
+    files.forEach(f=>{ if(!pendingNames.includes(f.name)){ pendingNames.push(f.name); } window.__pendingFiles=window.__pendingFiles||new Map(); window.__pendingFiles.set(f.name,f); });
+    attachInput.value=""; renderAttachChips();
+    if(files.length) setStatus(files.length+" फ़ाइल अटैच हुई। अब संदेश लिखकर Send दबाइए।");
+  };
+  $("chatAttach").onclick=()=>attachInput.click();
+
+  // ---------- send / stop / new chat ----------
+  const GO_RE=/बना\s*(ओ|ओं|इए|इये|दो|दे|दीजिए|दीजिये)|शुरू\s*कर|कर\s*दो|कर\s*दीजिए|कीजिए|\b(go ahead|do it|build it|start building|make it|create it|proceed)\b/i;
+  const NO_RE=/मत\s|नहीं|रुको|रुकिए|अभी\s*नहीं|\bdon'?t\b|\bstop\b|\bwait\b/i;
+  async function sendChat(){
+    if(chatBusy) return;
+    const text=chatInput.value.trim();
+    if(!text&&!pendingNames.length) return;
+    if(!geminiKey()){ addMsg("bot","पहले More options खोलकर Gemini API key डालिए और Save कीजिए, फिर मुझसे बात कर पाएँगे।"); openMore(); return; }
+    if(!token()){ addMsg("bot","पहले More options में GitHub token डालकर Connect दबाइए।"); openMore(); return; }
+    chatBusy=true; stopFlag=false; failedBuildsThisTurn=0; lastApkUrl="";
+    $("chatSend").disabled=true; $("chatStop").disabled=false;
+    try{
+      await ensureOwner();
+      const parts=[];
+      const shown=[];
+      for(const n of pendingNames){
+        const f=window.__pendingFiles&&window.__pendingFiles.get(n);
+        if(f){ setStatus("फ़ाइल पढ़ रही है: "+n); (await readAttachment(f)).forEach(p=>parts.push(p)); shown.push(n); }
+      }
+      window.__pendingFiles=new Map(); pendingNames=[]; renderAttachChips();
+      if(text) parts.push({text});
+      else parts.push({text:"(बिना संदेश के फ़ाइलें भेजी हैं।)"});
+      addMsg("user",(shown.length?"[अटैच: "+shown.join(", ")+"]\n":"")+text);
+      chatInput.value="";
+      approved=GO_RE.test(text)&&!NO_RE.test(text);
+      const last=chatHistory[chatHistory.length-1];
+      if(last&&last.role==="user") last.parts.push(...parts); else chatHistory.push({role:"user",parts});
+      await runAgent();
+    }catch(e){
+      addMsg("err",friendlyGeminiError(e));
+    }finally{
+      saveHistory();
+      chatBusy=false; $("chatSend").disabled=false; $("chatStop").disabled=true; setStatus("");
+      chatInput.focus();
+    }
+  }
+  $("chatSend").onclick=sendChat;
+  chatInput.addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); sendChat(); } });
+  $("chatStop").onclick=()=>{ stopFlag=true; if(approvalResolver) approvalResolver(false); setStatus("रोक रहा हूँ…"); };
+  $("chatStop").disabled=true;
+  $("chatNew").onclick=()=>{
+    if(chatBusy){ setStatus("पहले Stop दबाइए, फिर नई चैट शुरू कीजिए।"); return; }
+    chatHistory=[]; try{ localStorage.removeItem("apkchat_hist"); }catch{}
+    attachments.clear(); zipEntries.clear(); pendingNames=[]; renderAttachChips(); renderHistory(); setStatus("नई चैट शुरू हुई। नोट्स सुरक्षित हैं।");
+  };
+  $("chatModel").value=chatModel();
+  $("saveChatModel").onclick=()=>{ const v=$("chatModel").value.trim(); if(v) localStorage.setItem("apkchat_model",v); else localStorage.removeItem("apkchat_model"); msg($("chatModelStatus"),"Chat AI model: "+chatModel(),"ok"); };
+  renderHistory();
+  window.__apkAgent={TOOLS,execTool,generateProject,TOOL_DECLS,sysPrompt,setApproved:v=>{approved=v;},setOwner:v=>{ownerLogin=v;},get history(){return chatHistory;}};
 })();
 </script>
 </body>
