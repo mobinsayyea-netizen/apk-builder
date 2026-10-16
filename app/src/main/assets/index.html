@@ -94,6 +94,15 @@
 <input id="geminiKey" type="password" placeholder="AIza..." autocomplete="off">
 <label><input type="checkbox" id="rememberGeminiKey" style="width:auto" checked> Remember this key in this file</label>
 <button id="saveGeminiKey">Save Gemini key</button>
+<h3 style="margin-top:18px">AI provider (Gemini या OpenRouter)</h3>
+<label for="aiProvider">Chat और auto-fix के लिए कौन-सा AI</label>
+<select id="aiProvider"><option value="gemini">Gemini</option><option value="openrouter">OpenRouter</option></select>
+<label for="orKey">OpenRouter API key</label>
+<input id="orKey" type="password" placeholder="sk-or-..." autocomplete="off">
+<label for="orModel">OpenRouter model</label>
+<input id="orModel" placeholder="google/gemini-2.5-flash">
+<button id="saveOr" type="button">Save OpenRouter settings</button>
+<div id="orStatus" class="status" role="status" aria-live="polite"></div>
 <h3 style="margin-top:18px">Chat AI model</h3>
 <label for="chatModel">Gemini model for the chat</label>
 <input id="chatModel" placeholder="gemini-2.5-flash">
@@ -623,7 +632,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
   let repoDefaultBranch = "main";
   let extractedFiles = [];
   let autoFixAttempts = 0;
-  const AUTO_FIX_MAX_ATTEMPTS = 3;
+  const AUTO_FIX_MAX_ATTEMPTS = 6;
 
   function token(){ return $("token").value.trim() || localStorage.getItem("gh_apk_token") || ""; }
   function owner(){ return $("owner").value.trim(); }
@@ -1757,6 +1766,16 @@ jobs:
     }catch(e){ return null; }
   }
   async function callGemini(prompt){
+    if(aiProvider()==="openrouter"){
+      const key=orKey();
+      if(!key) throw new Error("No OpenRouter API key set.");
+      const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key,"HTTP-Referer":"https://github.com/mobinsayyea-netizen/apk-builder","X-Title":"APK Builder"},body:JSON.stringify({model:orModel(),messages:[{role:"user",content:prompt}]})});
+      const d=await r.json().catch(()=>null);
+      if(!r.ok) throw new Error((d&&d.error&&(d.error.message||JSON.stringify(d.error)))||("OpenRouter HTTP "+r.status));
+      const t=d&&d.choices&&d.choices[0]&&d.choices[0].message&&d.choices[0].message.content;
+      if(!t) throw new Error("OpenRouter returned an empty response.");
+      return typeof t==="string"?t:JSON.stringify(t);
+    }
     const key=geminiKey();
     if(!key) throw new Error("No Gemini API key set.");
     const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="+encodeURIComponent(key),{
@@ -1772,7 +1791,7 @@ jobs:
     return text;
   }
   async function tryGeminiAutoFix(){
-    if(!geminiKey()){
+    if(!aiKey()){
       msg($("geminiFixStatus"),"No Gemini API key set — skipping automatic fixing. Add one above and tap \"Save Gemini key\" to enable it.","");
       return;
     }
@@ -2142,8 +2161,97 @@ jobs:
   // builds the APK on GitHub Actions, fixes build errors and returns the direct APK link.
   // Everything below reuses this page's own GitHub helpers (request, explainError, ...).
   // =====================================================================================
+
+  // ---------- AI provider (Gemini / OpenRouter) ----------
+  function aiProvider(){ return localStorage.getItem("apk_ai_provider")==="openrouter"?"openrouter":"gemini"; }
+  function orKey(){ return ($("orKey").value||"").trim()||localStorage.getItem("openrouter_apk_key")||""; }
+  function orModel(){ return ($("orModel").value||"").trim()||localStorage.getItem("apkchat_or_model")||"google/gemini-2.5-flash"; }
+  function aiKey(){ return aiProvider()==="openrouter"?orKey():geminiKey(); }
+  function aiName(){ return aiProvider()==="openrouter"?"OpenRouter":"Gemini"; }
+  (function initOr(){
+    $("aiProvider").value=aiProvider();
+    $("orKey").value=localStorage.getItem("openrouter_apk_key")||"";
+    $("orModel").value=localStorage.getItem("apkchat_or_model")||"";
+    $("aiProvider").onchange=()=>{ localStorage.setItem("apk_ai_provider",$("aiProvider").value); msg($("orStatus"),"AI provider: "+aiName(),"ok"); };
+    $("saveOr").onclick=()=>{
+      localStorage.setItem("apk_ai_provider",$("aiProvider").value);
+      const k=$("orKey").value.trim(), m=$("orModel").value.trim();
+      if(k) localStorage.setItem("openrouter_apk_key",k); else localStorage.removeItem("openrouter_apk_key");
+      if(m) localStorage.setItem("apkchat_or_model",m); else localStorage.removeItem("apkchat_or_model");
+      msg($("orStatus"),"Saved. AI provider: "+aiName()+(aiProvider()==="openrouter"?" | model: "+orModel():""),"ok");
+    };
+  })();
+  function lowerSchema(x){
+    if(Array.isArray(x)) return x.map(lowerSchema);
+    if(x&&typeof x==="object"){ const o={}; for(const k in x){ o[k]=(k==="type"&&typeof x[k]==="string")?x[k].toLowerCase():lowerSchema(x[k]); } return o; }
+    return x;
+  }
+  function orTools(){
+    return TOOL_DECLS.map(d=>({type:"function",function:{name:d.name,description:d.description||"",parameters:d.parameters?lowerSchema(d.parameters):{type:"object",properties:{}}}}));
+  }
+  function toOpenAIMessages(contents){
+    const msgs=[{role:"system",content:sysPrompt()}];
+    let pendingIds=[];
+    contents.forEach((c,ci)=>{
+      const parts=c.parts||[];
+      if(c.role==="model"){
+        const text=parts.filter(p=>p.text!==undefined&&!p.thought).map(p=>p.text).join("");
+        const calls=parts.filter(p=>p.functionCall);
+        const m={role:"assistant",content:text||null};
+        pendingIds=[];
+        if(calls.length){
+          m.tool_calls=calls.map((p,j)=>{ const id="call_"+ci+"_"+j; pendingIds.push(id); return {id,type:"function",function:{name:p.functionCall.name,arguments:JSON.stringify(p.functionCall.args||{})}}; });
+        }
+        if(m.content!==null||m.tool_calls) msgs.push(m);
+      }else{
+        const resps=parts.filter(p=>p.functionResponse);
+        if(resps.length){
+          resps.forEach((p,j)=>{ msgs.push({role:"tool",tool_call_id:pendingIds[j]||("call_x_"+ci+"_"+j),content:JSON.stringify(p.functionResponse.response||{})}); });
+          pendingIds=[];
+        }else{
+          const content=[];
+          parts.forEach(p=>{
+            if(p.text!==undefined) content.push({type:"text",text:p.text});
+            else if(p.inlineData) content.push({type:"image_url",image_url:{url:"data:"+p.inlineData.mimeType+";base64,"+p.inlineData.data}});
+          });
+          if(content.length) msgs.push({role:"user",content});
+        }
+      }
+    });
+    return msgs;
+  }
+  async function orChat(){
+    const body={model:orModel(),messages:toOpenAIMessages(compactForSend()),tools:orTools(),temperature:0.5};
+    let lastErr;
+    for(let attempt=1;attempt<=4;attempt++){
+      if(stopFlag) throw new Error("रोक दिया गया");
+      const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+orKey(),"HTTP-Referer":"https://github.com/mobinsayyea-netizen/apk-builder","X-Title":"APK Builder"},body:JSON.stringify(body)});
+      const data=await r.json().catch(()=>null);
+      if(r.ok&&data&&data.choices&&data.choices[0]){
+        const ch=data.choices[0], m=ch.message||{};
+        const parts=[];
+        if(m.content) parts.push({text:typeof m.content==="string"?m.content:JSON.stringify(m.content)});
+        let bad=false;
+        (m.tool_calls||[]).forEach(tc=>{
+          let args={};
+          try{ args=JSON.parse(tc.function.arguments||"{}"); }catch{ bad=true; }
+          parts.push({functionCall:{name:tc.function.name,args}});
+        });
+        if(bad&&!parts.some(p=>p.text)) return {candidates:[{finishReason:"MALFORMED",content:{role:"model",parts:[]}}]};
+        return {candidates:[{finishReason:ch.finish_reason||"STOP",content:{role:"model",parts}}]};
+      }
+      const m=(data&&data.error&&(data.error.message||JSON.stringify(data.error)))||("OpenRouter HTTP "+r.status);
+      lastErr=new Error(m); lastErr.status=r.status;
+      if(r.status===429||r.status===502||r.status===503||r.status===500||r.status===408){
+        setStatus("OpenRouter व्यस्त है, थोड़ी देर रुककर फिर कोशिश… ("+attempt+"/4)");
+        await sleep(Math.min(6000*attempt,25000)); continue;
+      }
+      break;
+    }
+    throw lastErr;
+  }
   const CHAT_MODEL_DEFAULT="gemini-2.5-flash";
-  const MAX_TURN_STEPS=70, MAX_BUILD_FIX_TRIES=6;
+  const MAX_TURN_STEPS=300, MAX_BUILD_FIX_TRIES=10;
   const chatLog=$("chatLog"), chatInput=$("chatInput"), chatStatus=$("chatStatus");
   const attachInput=$("chatFile"), attachList=$("chatAttachList");
   const attachments=new Map();      // name -> {bytes:Uint8Array,type}
@@ -2280,8 +2388,8 @@ BUILD LOOP (after go-ahead)
   const S={type:"STRING"};
   const TOOL_DECLS=[
     {name:"list_repos",description:"List the person's GitHub repositories (name, description, last update)."},
-    {name:"list_files",description:"List files in a repository (up to 300 paths).",parameters:{type:"OBJECT",properties:{repo:S,path_prefix:{type:"STRING",description:"optional folder prefix"}},required:["repo"]}},
-    {name:"read_file",description:"Read one text file from a repository (first 15000 characters).",parameters:{type:"OBJECT",properties:{repo:S,path:S},required:["repo","path"]}},
+    {name:"list_files",description:"List files in a repository (up to 5000 paths).",parameters:{type:"OBJECT",properties:{repo:S,path_prefix:{type:"STRING",description:"optional folder prefix"}},required:["repo"]}},
+    {name:"read_file",description:"Read one text file from a repository (first 100000 characters).",parameters:{type:"OBJECT",properties:{repo:S,path:S},required:["repo","path"]}},
     {name:"ask_go_ahead",description:"Show the person a plan with two buttons (हाँ, बनाओ / अभी नहीं) and wait. Use when ready to change things but they have not said 'बनाओ' yet.",parameters:{type:"OBJECT",properties:{plan:{type:"STRING",description:"short plan in Hindi"}},required:["plan"]}},
     {name:"save_note",description:"Save one short line about the person's lasting wishes, decisions or project facts. Never secrets.",parameters:{type:"OBJECT",properties:{text:S},required:["text"]}},
     {name:"restore_notes",description:"Load saved notes back from the person's GitHub repo 'builder-notes' (after a backup)."},
@@ -2311,7 +2419,6 @@ BUILD LOOP (after go-ahead)
   }
   async function agentCommit(name,entries,message){
     if(!entries.length) throw new Error("कोई फ़ाइल नहीं दी गई");
-    if(entries.length>500) throw new Error("एक बार में 500 से ज़्यादा फ़ाइलें नहीं भेज सकते — कई हिस्सों में भेजिए।");
     const base=rp(name);
     const info=await request(base);
     const branch=info.default_branch||"main";
@@ -2348,7 +2455,7 @@ BUILD LOOP (after go-ahead)
     const t=await request(rp(name)+"/git/trees/"+enc(info.default_branch)+"?recursive=1");
     return {branch:info.default_branch,items:(t.tree||[]).filter(x=>x.type==="blob")};
   }
-  function limitJson(obj,max=12000){
+  function limitJson(obj,max=60000){
     let s=JSON.stringify(obj);
     if(s.length<=max) return obj;
     return {truncated:true,result:s.slice(0,max)};
@@ -2443,7 +2550,7 @@ BUILD LOOP (after go-ahead)
       const {branch,items}=await repoTreePaths(repo);
       let list=items.map(x=>x.path+" ("+x.size+" B)");
       if(path_prefix) list=list.filter(p=>p.startsWith(path_prefix));
-      return {branch,total:list.length,files:list.slice(0,300)};
+      return {branch,total:list.length,files:list.slice(0,5000)};
     },
     async read_file({repo,path}){
       path=cleanPath(path);
@@ -2453,7 +2560,7 @@ BUILD LOOP (after go-ahead)
       let text;
       if(d.content&&d.encoding==="base64") text=decodeBase64Utf8(d.content);
       else{ const b=await request(rp(repo)+"/git/blobs/"+d.sha); text=decodeBase64Utf8(b.content); }
-      return {path,size:d.size,truncated:text.length>15000,content:text.slice(0,15000)};
+      return {path,size:d.size,truncated:text.length>100000,content:text.slice(0,100000)};
     },
     async ask_go_ahead({plan}){
       if(approved) return {approved:true,note:"पहले से अनुमति है"};
@@ -2605,8 +2712,9 @@ BUILD LOOP (after go-ahead)
 
   // ---------- Gemini call + main loop ----------
   async function geminiChat(){
+    if(aiProvider()==="openrouter") return orChat();
     const key=geminiKey();
-    const body={systemInstruction:{parts:[{text:sysPrompt()}]},contents:compactForSend(),tools:[{functionDeclarations:TOOL_DECLS}],generationConfig:{temperature:0.5,maxOutputTokens:32000}};
+    const body={systemInstruction:{parts:[{text:sysPrompt()}]},contents:compactForSend(),tools:[{functionDeclarations:TOOL_DECLS}],generationConfig:{temperature:0.5,maxOutputTokens:65000}};
     let lastErr;
     for(let attempt=1;attempt<=4;attempt++){
       if(stopFlag) throw new Error("रोक दिया गया");
@@ -2628,7 +2736,7 @@ BUILD LOOP (after go-ahead)
     if(e&&e.status===429||/quota|rate/i.test(m)) return "Gemini की सीमा (quota) अभी भर गई है। कुछ देर बाद \"जारी रखो\" लिखिए। (फ्री key की रोज़ की सीमा होती है।)";
     if(/API key not valid|API_KEY_INVALID|permission/i.test(m)) return "Gemini key सही नहीं लग रही। More options में key जाँचकर Save कीजिए।";
     if(e&&e.status===404) return "यह Gemini मॉडल नहीं मिला ("+chatModel()+")। More options में 'Chat AI model' बदलकर देखिए, जैसे gemini-2.5-flash।";
-    return "Gemini से जवाब नहीं आया: "+m;
+    return aiName()+" से जवाब नहीं आया: "+m;
   }
 
   async function runAgent(){
@@ -2714,7 +2822,7 @@ BUILD LOOP (after go-ahead)
     if(chatBusy) return;
     const text=chatInput.value.trim();
     if(!text&&!pendingNames.length) return;
-    if(!geminiKey()){ addMsg("bot","पहले More options खोलकर Gemini API key डालिए और Save कीजिए, फिर मुझसे बात कर पाएँगे।"); openMore(); return; }
+    if(!aiKey()){ addMsg("bot","पहले More options खोलकर "+aiName()+" API key डालिए और Save कीजिए, फिर मुझसे बात कर पाएँगे।"); openMore(); return; }
     if(!token()){ addMsg("bot","पहले More options में GitHub token डालकर Connect दबाइए।"); openMore(); return; }
     chatBusy=true; stopFlag=false; failedBuildsThisTurn=0; lastApkUrl="";
     $("chatSend").disabled=true; $("chatStop").disabled=false;
